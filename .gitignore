@@ -10,3 +10,4 @@ server/data/*.sqlite-shm
 .DS_Store
 .vscode/
 .idea/
+server/data/clinic_data.json
