@@ -1,35 +1,100 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../services/api';
+import { api, BACKEND_URL } from '../services/api';
 import { useSocket } from '../context/SocketContext';
 import {
   BarChart3,
-  TrendingDown,
   Clock,
   Users,
   Award,
   Download,
   Database,
-  CheckCircle2,
   Copy,
   Check,
   MessageSquare,
   PhoneCall,
-  Sparkles,
-  ArrowDownRight
+  ArrowDownRight,
+  X,
+  RefreshCw,
+  AlertCircle
 } from 'lucide-react';
+
+const StatCard = ({ label, value, unit, hint, icon: Icon, tone }) => (
+  <div className="stat-card">
+    <div className="flex items-center gap-2.5">
+      <span className={`icon-tile ${tone}`} aria-hidden="true">
+        <Icon size={17} />
+      </span>
+      <span className="text-subheadline font-medium text-secondary">{label}</span>
+    </div>
+    <div className="stat-value text-label">
+      {value}{unit && <span className="text-subheadline font-normal text-secondary ml-1">{unit}</span>}
+    </div>
+    <div className="text-footnote text-secondary mt-1">{hint}</div>
+  </div>
+);
+
+const BarChart = ({ rows, maxValue }) => (
+  <div className="space-y-3">
+    {rows.map((row) => (
+      <div key={row.label} className="grid grid-cols-[minmax(0,10rem)_1fr_auto] items-center gap-3 text-subheadline">
+        <span className="text-label truncate">{row.label}</span>
+        <div className="h-2 rounded-full bg-fill overflow-hidden" aria-hidden="true">
+          <div
+            className="h-full rounded-full bg-accent transition-[width] duration-700"
+            style={{ width: `${maxValue ? Math.min(100, (row.value / maxValue) * 100) : 0}%` }}
+          />
+        </div>
+        <span className="text-headline text-label tabular w-8 text-right">{row.value}</span>
+      </div>
+    ))}
+  </div>
+);
+
+const SplitBar = ({ segments, total }) => (
+  <div>
+    <div className="flex h-2.5 rounded-full overflow-hidden bg-fill gap-0.5" aria-hidden="true">
+      {segments.map((s) => (
+        <div
+          key={s.label}
+          className={s.color}
+          style={{ width: `${total ? (s.value / total) * 100 : 0}%` }}
+          title={`${s.label}: ${s.value}`}
+        />
+      ))}
+    </div>
+    <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2.5 text-footnote text-secondary">
+      {segments.map((s) => (
+        <span key={s.label} className="flex items-center gap-1.5">
+          <span className={`w-2 h-2 rounded-full ${s.color}`} aria-hidden="true" />
+          {s.label} <span className="font-semibold text-label tabular">{s.value}</span>
+        </span>
+      ))}
+    </div>
+  </div>
+);
 
 export const AnalyticsReportPage = () => {
   const [analytics, setAnalytics] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [schemaModalOpen, setSchemaModalOpen] = useState(false);
   const [schemaSql, setSchemaSql] = useState('');
+  const [schemaError, setSchemaError] = useState('');
+  const [schemaLoading, setSchemaLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const { queueTick } = useSocket();
 
   useEffect(() => {
     loadData();
   }, [queueTick]);
+
+  useEffect(() => {
+    if (!schemaModalOpen) return;
+    const onKey = (e) => e.key === 'Escape' && setSchemaModalOpen(false);
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [schemaModalOpen]);
 
   const loadData = async () => {
     try {
@@ -40,21 +105,26 @@ export const AnalyticsReportPage = () => {
       ]);
       setAnalytics(anRes);
       setNotifications(notifRes.notifications || []);
+      setError('');
     } catch (err) {
-      console.error('Failed to load analytics:', err);
+      setError(err.message || 'Could not load analytics right now.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleOpenSchema = async () => {
+    setSchemaError('');
+    setSchemaLoading(true);
     try {
-      const res = await fetch('http://localhost:5000/api/schema/postgresql');
-      const text = await res.text();
-      setSchemaSql(text);
+      const res = await fetch(`${BACKEND_URL}/api/schema/postgresql`);
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      setSchemaSql(await res.text());
       setSchemaModalOpen(true);
-    } catch (err) {
-      alert('Failed to load schema');
+    } catch {
+      setSchemaError('Could not load the schema. Check that the server is running, then try again.');
+    } finally {
+      setSchemaLoading(false);
     }
   };
 
@@ -62,6 +132,13 @@ export const AnalyticsReportPage = () => {
     navigator.clipboard.writeText(schemaSql);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const impact = analytics?.pilotImpact || {
+    traditionalWaitMinutes: 52,
+    systemWaitMinutes: 14,
+    waitTimeReductionPercent: 73,
+    patientSatisfactionRating: 4.8
   };
 
   const handleExportCSV = () => {
@@ -76,16 +153,14 @@ export const AnalyticsReportPage = () => {
       ['Walk-in Patients', analytics.walkIns],
       ['Online Bookings', analytics.bookedAppointments],
       ['Missed / No Shows', analytics.noShows],
-      ['Traditional Clinic Wait (Before Pilot)', analytics.pilotImpact?.traditionalWaitMinutes || 52],
+      ['Traditional Clinic Wait (Before Pilot)', impact.traditionalWaitMinutes],
       ['Smart Queue Wait (After Pilot)', analytics.avgWaitTimeMinutes],
-      ['Wait Time Reduction', `${analytics.pilotImpact?.waitTimeReductionPercent || 73}%`]
+      ['Wait Time Reduction', `${impact.waitTimeReductionPercent}%`]
     ];
-
     const csvContent = 'data:text/csv;charset=utf-8,' + csvRows.map(e => e.join(',')).join('\n');
-    const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', 'Hospital_Queue_Pilot_Impact_Report.csv');
+    link.setAttribute('href', encodeURI(csvContent));
+    link.setAttribute('download', 'MediQ_Pilot_Impact_Report.csv');
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -93,311 +168,292 @@ export const AnalyticsReportPage = () => {
 
   if (!analytics && loading) {
     return (
-      <div className="max-w-6xl mx-auto px-4 py-20 text-center text-slate-400">
-        Loading clinic analytics & pilot data...
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 w-full space-y-5" aria-busy="true" aria-label="Loading analytics">
+        <div className="skeleton h-10 w-72" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[0, 1, 2, 3].map(i => <div key={i} className="skeleton h-32" />)}
+        </div>
+        <div className="skeleton h-64" />
       </div>
     );
   }
 
-  const impact = analytics?.pilotImpact || {
-    traditionalWaitMinutes: 52,
-    systemWaitMinutes: 14,
-    waitTimeReductionPercent: 73,
-    crowdingIndexReduction: '74% reduction in waiting room crowd',
-    patientSatisfactionRating: 4.8
-  };
+  if (!analytics && error) {
+    return (
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 w-full">
+        <h1 className="page-title mb-6">Analytics</h1>
+        <div role="alert" className="card max-w-md mx-auto p-6 text-center">
+          <AlertCircle size={24} className="text-red mx-auto mb-2" aria-hidden="true" />
+          <p className="text-headline text-label">Analytics could not be loaded</p>
+          <p className="text-subheadline text-secondary mt-1">{error}</p>
+          <button type="button" onClick={loadData} className="btn-secondary mt-4">
+            <RefreshCw size={14} aria-hidden="true" /> Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const avgWait = analytics?.avgWaitTimeMinutes ?? impact.systemWaitMinutes;
+  const minutesSaved = Math.max(0, impact.traditionalWaitMinutes - avgWait);
+  const doctorStats = analytics?.doctorStats || [];
+  const maxDoctorTotal = Math.max(1, ...doctorStats.map(d => d.totalPatients));
+  const statusSegments = [
+    { label: 'Completed', value: analytics?.completedToday || 0, color: 'bg-green' },
+    { label: 'Serving', value: analytics?.currentlyServing || 0, color: 'bg-accent' },
+    { label: 'Waiting', value: analytics?.currentlyWaiting || 0, color: 'bg-orange' },
+    { label: 'No show', value: analytics?.noShows || 0, color: 'bg-red' }
+  ];
+  const sourceSegments = [
+    { label: 'Online bookings', value: analytics?.bookedAppointments || 0, color: 'bg-indigo' },
+    { label: 'Walk-ins', value: analytics?.walkIns || 0, color: 'bg-teal' }
+  ];
+  const waitMax = Math.max(1, impact.traditionalWaitMinutes, avgWait);
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8 animate-fade-in space-y-8">
-      {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-800">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 w-full min-w-0 space-y-8">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 animate-fade-in">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              Pilot Impact Analytics & Viva Report
-            </h1>
-            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-              Week 12 Report Ready
-            </span>
-          </div>
-          <p className="text-xs text-slate-400 mt-1">
-            Real usage metrics, waiting time reduction analysis, and database audit logs for college project evaluation and clinic stakeholders.
+          <h1 className="page-title">Analytics</h1>
+          <p className="page-subtitle max-w-2xl">
+            Queue throughput, waiting time reduction and notification log for the clinic pilot.
           </p>
         </div>
-
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={handleOpenSchema}
-            className="flex items-center gap-1.5 py-2 px-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-400 border border-slate-800 text-xs font-bold transition shadow-sm"
-          >
-            <Database size={15} />
-            <span>PostgreSQL Schema</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={loadData} disabled={loading} className="btn-secondary btn-icon" aria-label="Refresh analytics" title="Refresh analytics">
+            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} aria-hidden="true" />
           </button>
-
-          <button
-            onClick={handleExportCSV}
-            className="flex items-center gap-1.5 py-2 px-3.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition shadow-md shadow-cyan-900/40"
-          >
-            <Download size={15} />
-            <span>Export Report (CSV)</span>
+          <button type="button" onClick={handleOpenSchema} disabled={schemaLoading} className="btn-secondary">
+            <Database size={15} aria-hidden="true" /> SQL schema
+          </button>
+          <button type="button" onClick={handleExportCSV} className="btn-primary">
+            <Download size={15} aria-hidden="true" /> Export CSV
           </button>
         </div>
       </div>
 
-      {/* Top 4 KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        {/* Total Patients */}
-        <div className="glass-panel p-5 border-slate-800">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Total Patients</span>
-            <div className="w-9 h-9 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center">
-              <Users size={18} />
-            </div>
-          </div>
-          <div className="text-3xl font-black font-mono text-white mt-3">
-            {analytics?.totalPatientsToday || 0}
-          </div>
-          <p className="text-[11px] text-slate-400 mt-1">
-            <strong className="text-cyan-400">{analytics?.walkIns || 0}</strong> Walk-ins • <strong className="text-cyan-400">{analytics?.bookedAppointments || 0}</strong> Bookings
-          </p>
+      {(error || schemaError) && (
+        <div role="alert" className="flex flex-wrap items-center gap-2.5 px-3.5 py-2.5 rounded-control bg-red-tint text-subheadline text-red">
+          <AlertCircle size={16} className="shrink-0" aria-hidden="true" />
+          <span className="flex-1 min-w-0 py-1">{error || schemaError}</span>
+          <button type="button" onClick={error ? loadData : handleOpenSchema} className="btn-danger-soft btn-sm">
+            Try again
+          </button>
         </div>
+      )}
 
-        {/* Avg Wait Time */}
-        <div className="glass-panel p-5 border-slate-800">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Avg Wait Time</span>
-            <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-              <Clock size={18} />
-            </div>
-          </div>
-          <div className="text-3xl font-black font-mono text-emerald-400 mt-3">
-            {analytics?.avgWaitTimeMinutes || 12} <span className="text-sm font-normal text-slate-400">mins</span>
-          </div>
-          <p className="text-[11px] text-emerald-400 font-semibold mt-1 flex items-center gap-1">
-            <ArrowDownRight size={13} /> {impact.waitTimeReductionPercent}% faster than manual token desk
-          </p>
-        </div>
-
-        {/* Avg Consultation Time */}
-        <div className="glass-panel p-5 border-slate-800">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Avg Consult Time</span>
-            <div className="w-9 h-9 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
-              <BarChart3 size={18} />
-            </div>
-          </div>
-          <div className="text-3xl font-black font-mono text-indigo-300 mt-3">
-            {analytics?.avgConsultTimeMinutes || 8} <span className="text-sm font-normal text-slate-400">mins</span>
-          </div>
-          <p className="text-[11px] text-slate-400 mt-1">
-            Per completed consultation
-          </p>
-        </div>
-
-        {/* Pilot Satisfaction */}
-        <div className="glass-panel p-5 border-slate-800">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Pilot Rating</span>
-            <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
-              <Award size={18} />
-            </div>
-          </div>
-          <div className="text-3xl font-black font-mono text-amber-400 mt-3">
-            4.8 <span className="text-sm font-normal text-slate-400">/ 5.0</span>
-          </div>
-          <p className="text-[11px] text-slate-400 mt-1">
-            Based on clinic pilot feedback
-          </p>
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          label="Patients today"
+          value={analytics?.totalPatientsToday || 0}
+          hint={`${analytics?.walkIns || 0} walk-ins, ${analytics?.bookedAppointments || 0} bookings`}
+          icon={Users}
+          tone=""
+        />
+        <StatCard
+          label="Average wait"
+          value={avgWait}
+          unit="min"
+          hint={
+            impact.waitTimeReductionPercent > 0 ? (
+              <span className="text-green font-medium flex items-center gap-1">
+                <ArrowDownRight size={14} aria-hidden="true" /> {impact.waitTimeReductionPercent}% less than a manual desk
+              </span>
+            ) : 'Live average for today'
+          }
+          icon={Clock}
+          tone="icon-tile-green"
+        />
+        <StatCard
+          label="Average consult"
+          value={analytics?.avgConsultTimeMinutes || 0}
+          unit="min"
+          hint="Per completed consultation"
+          icon={BarChart3}
+          tone="icon-tile-indigo"
+        />
+        <StatCard
+          label="Pilot rating"
+          value={impact.patientSatisfactionRating}
+          unit="/ 5"
+          hint="Patient feedback during pilot"
+          icon={Award}
+          tone="icon-tile-orange"
+        />
       </div>
 
-      {/* Week 11-12 Spotlight: Before vs After Pilot Impact Comparison */}
-      <div className="glass-panel p-6 sm:p-8 border-cyan-500/30 bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950/40 relative overflow-hidden">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="max-w-md">
-            <div className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-cyan-400 bg-cyan-500/10 px-2.5 py-0.5 rounded-full border border-cyan-500/20 mb-2">
-              <Sparkles size={12} /> Key Project Viva Deliverable
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        <div className="card lg:col-span-3">
+          <div className="card-header">
+            <h2 className="text-headline text-label">Wait time, before and after</h2>
+            <span className="badge-emerald tabular">{impact.waitTimeReductionPercent}% shorter</span>
+          </div>
+          <div className="card-body space-y-6">
+            <p className="text-title2 text-label">
+              Patients wait <span className="text-accent tabular">{minutesSaved} minutes</span> less than at a manual token desk.
+            </p>
+            <div className="space-y-4" role="img" aria-label={`Manual token desk ${impact.traditionalWaitMinutes} minutes, MediQ smart queue ${avgWait} minutes`}>
+              {[
+                { label: 'Manual token desk', value: impact.traditionalWaitMinutes, bar: 'bg-separator', text: 'text-secondary' },
+                { label: 'MediQ smart queue', value: avgWait, bar: 'bg-accent', text: 'text-accent' }
+              ].map((row) => (
+                <div key={row.label}>
+                  <div className="flex items-baseline justify-between gap-3 mb-1.5">
+                    <span className="text-subheadline text-label">{row.label}</span>
+                    <span className={`text-title2 tabular ${row.text}`}>
+                      {row.value}<span className="text-footnote font-normal text-secondary ml-1">min</span>
+                    </span>
+                  </div>
+                  <div className="h-3 rounded-full bg-fill overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${row.bar} transition-[width] duration-700`}
+                      style={{ width: `${Math.max(2, Math.min(100, (row.value / waitMax) * 100))}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
-            <h2 className="text-xl font-extrabold text-white">
-              Clinic Pilot Results: Before vs. After
-            </h2>
-            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-              Comparison between traditional manual walk-in queuing vs. MediQ real-time token tracking over a 2-day on-site pilot.
+            <p className="text-footnote text-secondary">
+              Manual desk figure is the pre-pilot baseline. Smart queue figure is today's live average.
             </p>
           </div>
+        </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-center">
-            {/* Traditional */}
-            <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
-              <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider">Before Pilot</span>
-              <div className="text-2xl font-black font-mono text-slate-300 mt-1 line-through decoration-rose-500">
-                52 mins
-              </div>
-              <p className="text-[10px] text-slate-500 mt-0.5">Manual Waiting Room</p>
+        <div className="card lg:col-span-2">
+          <div className="card-header">
+            <h2 className="text-headline text-label">Today's queue mix</h2>
+          </div>
+          <div className="card-body space-y-6">
+            <div>
+              <p className="text-subheadline font-medium text-secondary mb-2">By status</p>
+              <SplitBar segments={statusSegments} total={statusSegments.reduce((s, x) => s + x.value, 0)} />
             </div>
-
-            {/* Smart System */}
-            <div className="p-4 rounded-xl bg-cyan-950/60 border border-cyan-500/40 shadow-lg">
-              <span className="text-[11px] font-bold text-cyan-300 uppercase tracking-wider">With System</span>
-              <div className="text-2xl font-black font-mono text-emerald-400 mt-1">
-                {analytics?.avgWaitTimeMinutes || 14} mins
-              </div>
-              <p className="text-[10px] text-slate-400 mt-0.5">Phone Notification</p>
-            </div>
-
-            {/* Reduction */}
-            <div className="col-span-2 sm:col-span-1 p-4 rounded-xl bg-emerald-950/40 border border-emerald-500/40 shadow-lg">
-              <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">Wait Time Saved</span>
-              <div className="text-2xl font-black font-mono text-emerald-400 mt-1">
-                -73%
-              </div>
-              <p className="text-[10px] text-emerald-300 mt-0.5">38 mins saved / patient</p>
+            <div>
+              <p className="text-subheadline font-medium text-secondary mb-2">By source</p>
+              <SplitBar segments={sourceSegments} total={sourceSegments.reduce((s, x) => s + x.value, 0)} />
             </div>
           </div>
         </div>
       </div>
 
-      {/* Doctor Performance & OPD Distribution Table */}
-      <div className="glass-panel overflow-hidden border-slate-800">
-        <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-            <Users size={16} className="text-cyan-400" /> Doctor OPD Queue Performance
-          </h3>
-          <span className="text-xs text-slate-400 font-mono">3 OPD Chambers Active</span>
+      <section>
+        <div className="flex items-center justify-between gap-2 px-4 mb-2">
+          <h2 className="section-title">Doctor OPD performance</h2>
+          <span className="text-footnote text-secondary tabular">{doctorStats.length} chambers</span>
         </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-300">
-            <thead className="bg-slate-900/90 text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-800 font-semibold">
-              <tr>
-                <th className="px-5 py-3.5">Doctor</th>
-                <th className="px-5 py-3.5">Specialization & Room</th>
-                <th className="px-5 py-3.5">Total Patients</th>
-                <th className="px-5 py-3.5">Completed</th>
-                <th className="px-5 py-3.5">In Queue</th>
-                <th className="px-5 py-3.5">Currently Serving</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/60 font-sans">
-              {analytics?.doctorStats?.map((doc) => (
-                <tr key={doc.doctorId} className="hover:bg-slate-800/40 transition">
-                  <td className="px-5 py-3.5 font-bold text-white">
-                    {doc.name}
-                  </td>
-                  <td className="px-5 py-3.5 text-slate-300">
-                    <div>{doc.specialization}</div>
-                    <span className="text-[11px] text-slate-400 font-mono">{doc.roomNumber}</span>
-                  </td>
-                  <td className="px-5 py-3.5 font-mono font-bold text-slate-200">
-                    {doc.totalPatients}
-                  </td>
-                  <td className="px-5 py-3.5 font-mono text-emerald-400 font-bold">
-                    {doc.completed}
-                  </td>
-                  <td className="px-5 py-3.5 font-mono text-amber-400 font-bold">
-                    {doc.waiting}
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded ${
-                      doc.currentServing !== 'None'
-                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                        : 'bg-slate-800 text-slate-500'
-                    }`}>
-                      {doc.currentServing}
-                    </span>
-                  </td>
+        <div className="card overflow-hidden">
+          <div className="card-body">
+            <BarChart
+              rows={doctorStats.map(d => ({ label: d.name, value: d.totalPatients }))}
+              maxValue={maxDoctorTotal}
+            />
+          </div>
+          <div className="overflow-x-auto">
+            <table className="table-base">
+              <thead>
+                <tr>
+                  <th>Doctor</th>
+                  <th>Room</th>
+                  <th className="text-right">Patients</th>
+                  <th className="text-right">Completed</th>
+                  <th className="text-right">Waiting</th>
+                  <th>Serving</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {doctorStats.map((doc) => (
+                  <tr key={doc.doctorId}>
+                    <td>
+                      <div className="text-subheadline font-medium text-label">{doc.name}</div>
+                      <div className="text-footnote text-secondary">{doc.specialization}</div>
+                    </td>
+                    <td className="text-secondary tabular">{doc.roomNumber}</td>
+                    <td className="text-label font-medium text-right tabular">{doc.totalPatients}</td>
+                    <td className="text-green font-medium text-right tabular">{doc.completed}</td>
+                    <td className="text-orange font-medium text-right tabular">{doc.waiting}</td>
+                    <td>
+                      <span className={doc.currentServing !== 'None' ? 'badge-emerald tabular' : 'badge-slate tabular'}>
+                        {doc.currentServing}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      </section>
 
-      {/* Real-Time SMS & WhatsApp Dispatch Audit Log */}
-      <div className="glass-panel overflow-hidden border-slate-800">
-        <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-            <MessageSquare size={16} className="text-emerald-400" /> WhatsApp Cloud & Twilio SMS Dispatch Audit Log
-          </h3>
-          <span className="text-xs text-slate-400">Live API Telemetry</span>
+      <section>
+        <div className="flex items-center justify-between gap-2 px-4 mb-2">
+          <h2 className="section-title">Notification log</h2>
+          <span className="text-footnote text-secondary tabular">Last {notifications.length} sent</span>
         </div>
-
-        <div className="p-4 space-y-2.5 max-h-72 overflow-y-auto">
+        <div className="list-inset max-h-96 overflow-y-auto">
           {notifications.length === 0 ? (
-            <p className="text-xs text-slate-500 italic text-center py-4">No notifications dispatched yet.</p>
+            <p className="list-row text-secondary">No notifications sent yet. They appear here as tokens are called.</p>
           ) : (
             notifications.map((n) => {
               const isWhatsApp = n.channel === 'WHATSAPP';
+              const Icon = isWhatsApp ? MessageSquare : PhoneCall;
               return (
-                <div key={n.id} className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex items-start justify-between gap-4 text-xs">
-                  <div className="flex items-start gap-3">
-                    <div className={`p-1.5 rounded-lg flex-shrink-0 ${
-                      isWhatsApp ? 'bg-emerald-500/20 text-emerald-400' : 'bg-cyan-500/20 text-cyan-400'
-                    }`}>
-                      {isWhatsApp ? <MessageSquare size={16} /> : <PhoneCall size={16} />}
+                <div key={n.id} className="list-row items-start py-3">
+                  <span className={`icon-tile ${isWhatsApp ? 'icon-tile-green' : ''}`} aria-hidden="true">
+                    <Icon size={16} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-subheadline font-medium text-label truncate">
+                        {isWhatsApp ? 'WhatsApp' : 'SMS'} · {n.messageType}
+                      </span>
+                      <span className="text-caption text-secondary tabular shrink-0 pr-4">
+                        {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
                     </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-white uppercase text-[10px] tracking-wider">
-                          {n.channel} • {n.messageType}
-                        </span>
-                        <span className="text-[10px] font-mono text-cyan-400">To: {n.recipientPhone}</span>
-                      </div>
-                      <p className="text-slate-300 mt-1 font-sans text-xs leading-relaxed">
-                        {n.content}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="text-right flex-shrink-0">
-                    <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-500/20">
-                      ✓ Delivered
-                    </span>
-                    <p className="text-[10px] text-slate-500 mt-1 font-mono">
-                      {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </p>
+                    <p className="text-subheadline text-secondary mt-0.5 pr-4">{n.content}</p>
+                    <p className="text-caption text-tertiary tabular mt-1">{n.recipientPhone} · Delivered</p>
                   </div>
                 </div>
               );
             })
           )}
         </div>
-      </div>
+      </section>
 
-      {/* PostgreSQL Schema Modal (Supabase / Railway Ready) */}
       {schemaModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-2xl w-full p-6 shadow-2xl flex flex-col max-h-[85vh]">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-              <div className="flex items-center gap-2">
-                <Database size={18} className="text-cyan-400" />
-                <h3 className="text-base font-bold text-white">
-                  PostgreSQL Production DDL Schema (Supabase / Railway)
-                </h3>
-              </div>
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/35 animate-fade-in"
+          onClick={() => setSchemaModalOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="schema-title"
+            onClick={(e) => e.stopPropagation()}
+            className="glass rounded-t-sheet sm:rounded-sheet max-w-2xl w-full p-5 sm:p-6 flex flex-col max-h-[85vh] animate-slide-up"
+          >
+            <div className="flex items-center justify-between pb-3">
+              <h3 id="schema-title" className="text-headline text-label">PostgreSQL schema</h3>
               <button
+                type="button"
                 onClick={() => setSchemaModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1"
+                aria-label="Close"
+                className="w-11 h-11 -m-2 flex items-center justify-center rounded-full text-secondary hover:bg-fill"
               >
-                ✕
+                <X size={20} />
               </button>
             </div>
-
-            <p className="text-xs text-slate-400 my-3">
-              Copy and execute this ANSI SQL schema directly into your Supabase SQL editor or Railway PostgreSQL database for cloud deployment.
+            <p className="text-footnote text-secondary mb-3">
+              Run this DDL in a Supabase or Railway PostgreSQL instance to deploy to the cloud.
             </p>
-
-            <div className="flex-1 overflow-y-auto bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-xs text-slate-300 leading-relaxed">
+            <div className="flex-1 overflow-y-auto bg-surface-secondary p-4 rounded-control font-mono text-caption text-label leading-relaxed">
               <pre>{schemaSql}</pre>
             </div>
-
-            <div className="pt-4 flex justify-end gap-3">
-              <button
-                onClick={handleCopySchema}
-                className="py-2.5 px-4 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs transition flex items-center gap-1.5"
-              >
+            <div className="pt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setSchemaModalOpen(false)} className="btn-ghost btn-sm">Close</button>
+              <button type="button" onClick={handleCopySchema} className="btn-primary btn-sm">
                 {copied ? <Check size={14} /> : <Copy size={14} />}
-                <span>{copied ? 'Copied to Clipboard!' : 'Copy Schema SQL'}</span>
+                {copied ? 'Copied' : 'Copy SQL'}
               </button>
             </div>
           </div>

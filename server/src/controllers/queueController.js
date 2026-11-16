@@ -1,173 +1,134 @@
 import { db } from '../config/db.js';
 import { notificationService } from '../services/notificationService.js';
+import { handler, emit, queueUpdated, badRequest, notFound, conflict } from '../utils/errors.js';
+import { requireText, requirePhone, normalizePhone, requireId, optionalText, optionalAge, optionalGender, optionalObject, tokenStatus } from '../utils/validate.js';
+import { nowIso, minutesSince, avgConsultMinutes } from '../utils/time.js';
+import { ACTIVE_STATUSES, SERVING_STATUSES, isServing, findServing, issueToken, queueStats } from '../utils/queue.js';
 
-export const getQueueTokens = (req, res) => {
-  const { doctorId, status } = req.query;
-  const tokens = db.getQueueTokens({ doctorId, status });
-  res.json({ tokens });
+const loadToken = (tokenId) => {
+  const token = db.getQueueTokenById(requireId(tokenId, 'Token ID'));
+  if (!token) throw notFound('Token not found');
+  return token;
 };
 
-export const createWalkInToken = (req, res) => {
+const loadDoctor = (doctorId) => {
+  const doctor = db.getDoctorById(requireId(doctorId, 'Doctor ID'));
+  if (!doctor) throw notFound('Doctor not found');
+  return doctor;
+};
+
+const releaseDoctorPointer = (token) => {
+  const doctor = db.getDoctorById(token.doctorId);
+  if (doctor && doctor.currentServingTokenId === token.id) {
+    db.updateDoctor(token.doctorId, { currentServingTokenId: null });
+  }
+};
+
+export const getQueueTokens = handler((req, res) => {
+  const { doctorId } = req.query;
+  const status = tokenStatus(req.query.status);
+  res.json({ tokens: db.getQueueTokens({ doctorId, status }) });
+});
+
+export const createWalkInToken = handler((req, res) => {
   const { patientName, patientPhone, patientAge, patientGender, doctorId, reason, isEmergency, isSenior } = req.body;
-
   if (!patientName || !patientPhone || !doctorId) {
-    return res.status(400).json({ error: 'Patient name, phone, and doctor selection are required' });
+    throw badRequest('Patient name, phone, and doctor selection are required');
   }
 
-  const doctor = db.getDoctorById(doctorId);
-  if (!doctor) {
-    return res.status(404).json({ error: 'Doctor not found' });
-  }
-
-  const token = db.createQueueToken({
+  const doctor = loadDoctor(doctorId);
+  const token = issueToken({
     tokenType: isEmergency ? 'emergency' : 'walk_in',
-    patientName,
-    patientPhone,
-    patientAge: Number(patientAge) || null,
-    patientGender: patientGender || 'Other',
-    reason: reason || 'Walk-in Consultation',
-    doctorId,
-    roomNumber: doctor.roomNumber,
+    patientName: requireText(patientName, 'Patient name', 80),
+    patientPhone: requirePhone(patientPhone),
+    patientAge: optionalAge(patientAge),
+    patientGender: optionalGender(patientGender),
+    reason: optionalText(reason, 'Walk-in Consultation', 300),
+    doctorId: doctor.id,
     isEmergency: !!isEmergency,
     isSenior: !!isSenior
-  });
+  }, doctor);
 
-  // Send WhatsApp confirmation with live tracking link
-  notificationService.notifyTokenGenerated(token, doctor);
+  emit(req, 'TOKEN_CREATED', token);
+  queueUpdated(req, 'token_created', doctor.id, token.id);
 
-  // Broadcast to all screens
-  if (req.app.get('io')) {
-    const io = req.app.get('io');
-    io.emit('TOKEN_CREATED', token);
-    io.emit('QUEUE_UPDATED', { doctorId });
-  }
+  res.status(201).json({ message: 'Walk-in token generated successfully!', token });
+});
 
-  res.status(201).json({
-    message: 'Walk-in token generated successfully!',
-    token
-  });
-};
-
-export const callNextToken = (req, res) => {
+export const callNextToken = handler((req, res) => {
   const { doctorId, specificTokenId } = req.body;
+  const doctor = loadDoctor(doctorId);
+  if (!doctor.isAvailable) throw conflict(`${doctor.name} is marked Away. Set the doctor as Available first`);
 
-  if (!doctorId) {
-    return res.status(400).json({ error: 'Doctor ID is required' });
-  }
-
-  const doctor = db.getDoctorById(doctorId);
-  if (!doctor) {
-    return res.status(404).json({ error: 'Doctor not found' });
-  }
-
-  // Find target token
-  let nextToken = null;
+  let nextToken;
   if (specificTokenId) {
-    nextToken = db.getQueueTokenById(specificTokenId);
+    nextToken = loadToken(specificTokenId);
+    if (nextToken.doctorId !== doctor.id) throw badRequest('Token belongs to a different doctor');
+    if (nextToken.status !== 'waiting') throw conflict(`Token ${nextToken.displayToken} is ${nextToken.status}, only waiting tokens can be called`);
   } else {
-    // Get next waiting token sorted by priority then check-in time
-    const waitingTokens = db.getQueueTokens({ doctorId, status: 'waiting' });
-    if (waitingTokens.length > 0) {
-      nextToken = waitingTokens[0];
-    }
+    nextToken = db.getQueueTokens({ doctorId: doctor.id, status: 'waiting' })[0];
+    if (!nextToken) throw notFound('No patients currently waiting in queue for this doctor');
   }
 
-  if (!nextToken) {
-    return res.status(404).json({ error: 'No patients currently waiting in queue for this doctor' });
-  }
-
-  // If doctor is currently serving another token, mark previous token completed
-  const currentTokens = db.getQueueTokens({ doctorId, status: ['serving', 'called'] });
-  currentTokens.forEach(tok => {
-    if (tok.id !== nextToken.id) {
-      db.updateQueueToken(tok.id, {
-        status: 'completed',
-        completedTime: new Date().toISOString()
-      });
-    }
+  const now = nowIso();
+  db.getQueueTokens({ doctorId: doctor.id, status: SERVING_STATUSES }).forEach(tok => {
+    db.updateQueueToken(tok.id, {
+      status: 'completed',
+      completedTime: now,
+      serviceTimeMinutes: minutesSince(tok.calledTime, 1, 0)
+    });
   });
 
-  // Calculate waiting time
-  const now = new Date();
-  const waitMinutes = nextToken.checkInTime ? Math.max(1, Math.round((now - new Date(nextToken.checkInTime)) / 60000)) : 10;
-
-  // Update token to called / serving
   const updatedToken = db.updateQueueToken(nextToken.id, {
     status: 'serving',
-    calledTime: now.toISOString(),
-    waitTimeMinutes: waitMinutes
+    calledTime: now,
+    waitTimeMinutes: minutesSince(nextToken.checkInTime, 0, 0)
   });
+  db.updateDoctor(doctor.id, { currentServingTokenId: updatedToken.id });
 
-  // Update doctor's current serving pointer
-  db.updateDoctor(doctorId, { currentServingTokenId: updatedToken.id });
-
-  // Send WhatsApp/SMS "It's your turn!"
   notificationService.notifyTokenCalled(updatedToken, doctor);
-
-  // Check next patients in line (tokens 2 & 3 away) and notify them
-  const remainingWaiting = db.getQueueTokens({ doctorId, status: 'waiting' });
-  remainingWaiting.slice(0, 2).forEach((upToken, index) => {
+  db.getQueueTokens({ doctorId: doctor.id, status: 'waiting' }).slice(0, 2).forEach((upToken, index) => {
     notificationService.notifyUpcomingTurn(upToken, doctor, index + 1);
   });
 
-  // Emit Real-time Socket Event to TV Display, Doctor Desk, Receptionist, and Patient Trackers!
-  if (req.app.get('io')) {
-    const io = req.app.get('io');
-    io.emit('TOKEN_CALLED', {
-      token: updatedToken,
-      doctor: {
-        id: doctor.id,
-        name: doctor.name,
-        specialization: doctor.specialization,
-        roomNumber: doctor.roomNumber
-      }
-    });
-    io.emit('QUEUE_UPDATED', { doctorId });
-  }
-
-  res.json({
-    message: `Now serving Token ${updatedToken.displayToken}`,
+  emit(req, 'TOKEN_CALLED', {
     token: updatedToken,
-    doctor
+    doctor: {
+      id: doctor.id,
+      name: doctor.name,
+      specialization: doctor.specialization,
+      roomNumber: doctor.roomNumber
+    }
   });
-};
+  queueUpdated(req, 'token_called', doctor.id, updatedToken.id);
 
-export const recallToken = (req, res) => {
-  const { tokenId } = req.body;
-  const token = db.getQueueTokenById(tokenId);
-  if (!token) return res.status(404).json({ error: 'Token not found' });
+  res.json({ message: `Now serving Token ${updatedToken.displayToken}`, token: updatedToken, doctor });
+});
+
+export const recallToken = handler((req, res) => {
+  const token = loadToken(req.body.tokenId);
+  if (!isServing(token)) throw conflict(`Token ${token.displayToken} is not currently being called`);
 
   const doctor = db.getDoctorById(token.doctorId);
+  if (doctor) notificationService.notifyTokenCalled(token, doctor);
 
-  // Send reminder ping
-  if (doctor) {
-    notificationService.notifyTokenCalled(token, doctor);
-  }
-
-  // Emit audio chime event to TV and client screens
-  if (req.app.get('io')) {
-    req.app.get('io').emit('TOKEN_RECALLED', { token, doctor });
-  }
-
+  emit(req, 'TOKEN_RECALLED', { token, doctor });
   res.json({ message: `Token ${token.displayToken} recalled with chime alert!`, token });
-};
+});
 
-export const completeToken = (req, res) => {
+export const completeToken = handler((req, res) => {
   const { tokenId, diagnosis, prescription, vitals, notes, followUpDate } = req.body;
-  const token = db.getQueueTokenById(tokenId);
-  if (!token) return res.status(404).json({ error: 'Token not found' });
+  const token = loadToken(tokenId);
+  if (!isServing(token)) throw conflict(`Token ${token.displayToken} is ${token.status}, only a token in consultation can be completed`);
 
-  const now = new Date();
-  const serviceMinutes = token.calledTime ? Math.max(2, Math.round((now - new Date(token.calledTime)) / 60000)) : 8;
-
+  const consultNotes = optionalText(notes);
   const updatedToken = db.updateQueueToken(token.id, {
     status: 'completed',
-    completedTime: now.toISOString(),
-    serviceTimeMinutes: serviceMinutes,
-    notes: notes || ''
+    completedTime: nowIso(),
+    serviceTimeMinutes: minutesSince(token.calledTime, 1, 0),
+    notes: consultNotes
   });
 
-  // Save consultation notes
   const consultRecord = db.createConsultation({
     tokenId: token.id,
     doctorId: token.doctorId,
@@ -175,123 +136,84 @@ export const completeToken = (req, res) => {
     patientPhone: token.patientPhone,
     patientAge: token.patientAge,
     patientGender: token.patientGender,
-    diagnosis: diagnosis || 'Routine Checkup Completed',
-    prescription: prescription || '',
-    vitals: vitals || {},
-    notes: notes || '',
-    followUpDate: followUpDate || null
+    diagnosis: optionalText(diagnosis, 'Routine Checkup Completed'),
+    prescription: optionalText(prescription),
+    vitals: optionalObject(vitals, 'Vitals'),
+    notes: consultNotes,
+    followUpDate: optionalText(followUpDate, null, 10)
   });
 
-  // Clear doctor current serving pointer
-  const doctor = db.getDoctorById(token.doctorId);
-  if (doctor && doctor.currentServingTokenId === token.id) {
-    db.updateDoctor(token.doctorId, { currentServingTokenId: null });
-  }
+  releaseDoctorPointer(token);
 
-  // Socket broadcast
-  if (req.app.get('io')) {
-    const io = req.app.get('io');
-    io.emit('TOKEN_COMPLETED', { token: updatedToken, consultation: consultRecord });
-    io.emit('QUEUE_UPDATED', { doctorId: token.doctorId });
-  }
+  emit(req, 'TOKEN_COMPLETED', { token: updatedToken, consultation: consultRecord });
+  queueUpdated(req, 'token_completed', token.doctorId, token.id);
 
   res.json({
     message: `Consultation completed for Token ${updatedToken.displayToken}`,
     token: updatedToken,
     consultation: consultRecord
   });
-};
+});
 
-export const markNoShow = (req, res) => {
-  const { tokenId } = req.body;
-  const token = db.getQueueTokenById(tokenId);
-  if (!token) return res.status(404).json({ error: 'Token not found' });
+export const markNoShow = handler((req, res) => {
+  const token = loadToken(req.body.tokenId);
+  if (!ACTIVE_STATUSES.includes(token.status)) throw conflict(`Token ${token.displayToken} is already ${token.status}`);
 
-  const updated = db.updateQueueToken(token.id, {
-    status: 'no_show',
-    completedTime: new Date().toISOString()
-  });
+  const updated = db.updateQueueToken(token.id, { status: 'no_show', completedTime: nowIso() });
+  releaseDoctorPointer(token);
 
-  const doctor = db.getDoctorById(token.doctorId);
-  if (doctor && doctor.currentServingTokenId === token.id) {
-    db.updateDoctor(token.doctorId, { currentServingTokenId: null });
-  }
-
-  if (req.app.get('io')) {
-    const io = req.app.get('io');
-    io.emit('TOKEN_NO_SHOW', updated);
-    io.emit('QUEUE_UPDATED', { doctorId: token.doctorId });
-  }
+  emit(req, 'TOKEN_NO_SHOW', updated);
+  queueUpdated(req, 'token_no_show', token.doctorId, token.id);
 
   res.json({ message: `Token ${token.displayToken} marked as No-Show`, token: updated });
-};
+});
 
-export const reorderPriority = (req, res) => {
+export const reorderPriority = handler((req, res) => {
   const { tokenId, isEmergency, isSenior } = req.body;
-  const token = db.getQueueTokenById(tokenId);
-  if (!token) return res.status(404).json({ error: 'Token not found' });
+  const token = loadToken(tokenId);
+  if (token.status !== 'waiting') throw conflict(`Token ${token.displayToken} is ${token.status}, only waiting tokens can be reprioritized`);
 
   const priorityLevel = isEmergency ? 3 : isSenior ? 2 : 1;
   const updated = db.updateQueueToken(token.id, { priorityLevel });
 
-  if (req.app.get('io')) {
-    req.app.get('io').emit('QUEUE_UPDATED', { doctorId: token.doctorId });
-  }
-
+  queueUpdated(req, 'priority_changed', token.doctorId, token.id);
   res.json({ message: 'Token priority updated', token: updated });
-};
+});
 
-// Public Patient Live Queue Tracker Endpoint
-export const getTokenStatus = (req, res) => {
-  const { identifier } = req.params; // Can be tokenNumber, displayToken, or phone number
+export const getTokenStatus = handler((req, res) => {
+  const identifier = req.params.identifier.trim();
   let token = db.getQueueTokenById(identifier);
-
   if (!token) {
-    // Try finding by patient phone number
-    const tokensByPhone = db.getQueueTokens({ patientPhone: identifier });
-    if (tokensByPhone && tokensByPhone.length > 0) {
-      token = tokensByPhone[0];
-    }
+    const byPhone = db.getQueueTokens({ patientPhone: normalizePhone(identifier) });
+    token = byPhone.find(t => ACTIVE_STATUSES.includes(t.status))
+      || byPhone.sort((a, b) => b.checkInTime.localeCompare(a.checkInTime))[0];
   }
-
-  if (!token) {
-    return res.status(404).json({ error: 'Token not found or expired. Please check your token number or phone number.' });
-  }
+  if (!token) throw notFound('Token not found or expired. Please check your token number or phone number.');
 
   const doctor = db.getDoctorById(token.doctorId);
-  const allDocTokens = db.getQueueTokens({ doctorId: token.doctorId });
-
-  // Find currently serving token
-  const currentlyServing = allDocTokens.find(t => t.status === 'serving' || t.status === 'called');
-
-  // Calculate position among waiting tokens
-  const waitingTokens = allDocTokens.filter(t => t.status === 'waiting');
-  const indexInQueue = waitingTokens.findIndex(t => t.id === token.id);
+  const docTokens = db.getQueueTokens({ doctorId: token.doctorId });
+  const currentlyServing = findServing(docTokens);
+  const waitingTokens = docTokens.filter(t => t.status === 'waiting');
 
   let tokensAhead = 0;
-  let statusText = 'Waiting in line';
   let estimatedWaitMins = 0;
+  let statusText;
 
-  if (token.status === 'serving' || token.status === 'called') {
-    tokensAhead = 0;
+  if (isServing(token)) {
     statusText = "It's Your Turn! Please Enter Doctor's Room";
-    estimatedWaitMins = 0;
   } else if (token.status === 'completed') {
-    tokensAhead = 0;
     statusText = 'Consultation Completed';
-    estimatedWaitMins = 0;
   } else if (token.status === 'no_show') {
-    tokensAhead = 0;
     statusText = 'Marked as Absent / Missed Call';
-    estimatedWaitMins = 0;
   } else {
-    tokensAhead = indexInQueue >= 0 ? indexInQueue + 1 : waitingTokens.length;
-    estimatedWaitMins = tokensAhead * 12;
-    if (tokensAhead === 1) {
-      statusText = 'You are NEXT in line! Please stand near the door.';
-    } else {
-      statusText = `${tokensAhead} patient(s) ahead of you`;
-    }
+    const index = waitingTokens.findIndex(t => t.id === token.id);
+    tokensAhead = index >= 0 ? index + 1 : waitingTokens.length;
+    const avg = avgConsultMinutes(docTokens);
+    const currentRemaining = currentlyServing ? Math.max(0, avg - minutesSince(currentlyServing.calledTime, 0, 0)) : 0;
+    estimatedWaitMins = (tokensAhead - 1) * avg + currentRemaining;
+    statusText = tokensAhead === 1
+      ? 'You are NEXT in line! Please stand near the door.'
+      : `${tokensAhead} patient(s) ahead of you`;
   }
 
   res.json({
@@ -311,18 +233,13 @@ export const getTokenStatus = (req, res) => {
     estimatedWaitMins,
     statusText
   });
-};
+});
 
-export const getQueueSummary = (req, res) => {
-  const doctors = db.getDoctors();
-  const allTokens = db.getQueueTokens();
+export const getQueueSummary = handler((req, res) => {
+  const allTokens = db.getQueueTokens({ today: true });
 
-  const summary = doctors.map(doc => {
-    const docTokens = allTokens.filter(t => t.doctorId === doc.id);
-    const waiting = docTokens.filter(t => t.status === 'waiting');
-    const serving = docTokens.find(t => t.status === 'serving' || t.status === 'called');
-    const completed = docTokens.filter(t => t.status === 'completed');
-
+  const summary = db.getDoctors().map(doc => {
+    const { waiting, serving, completed, estimatedWait } = queueStats(allTokens.filter(t => t.doctorId === doc.id));
     return {
       doctorId: doc.id,
       doctorName: doc.name,
@@ -333,14 +250,14 @@ export const getQueueSummary = (req, res) => {
       servingToken: serving ? serving.displayToken : 'None',
       servingPatient: serving ? serving.patientName : null,
       completedCount: completed.length,
-      estimatedWaitMinutes: waiting.length * 12
+      estimatedWaitMinutes: estimatedWait
     };
   });
 
   res.json({
     summary,
     totalWaiting: allTokens.filter(t => t.status === 'waiting').length,
-    totalServing: allTokens.filter(t => t.status === 'serving' || t.status === 'called').length,
+    totalServing: allTokens.filter(isServing).length,
     totalCompleted: allTokens.filter(t => t.status === 'completed').length
   });
-};
+});

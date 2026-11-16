@@ -1,64 +1,74 @@
 import { db } from '../config/db.js';
 import { notificationService } from '../services/notificationService.js';
+import { handler, emit, queueUpdated, badRequest, notFound, conflict } from '../utils/errors.js';
+import { requireText, requirePhone, requireId, optionalText, optionalAge, optionalGender, requireDate, requireSlot, appointmentStatus } from '../utils/validate.js';
+import { isPastDate } from '../utils/time.js';
+import { issueToken } from '../utils/queue.js';
 
-export const getAppointments = (req, res) => {
-  const { doctorId, date, status } = req.query;
-  const list = db.getAppointments({ doctorId, date, status });
-  res.json({ appointments: list });
+const loadAppointment = (id) => {
+  const apt = db.getAppointmentById(requireId(id, 'Appointment ID'));
+  if (!apt) throw notFound('Appointment not found');
+  return apt;
 };
 
-export const createAppointment = (req, res) => {
+const requireSchedule = (appointmentDate, slotTime) => {
+  const date = requireDate(appointmentDate, 'Appointment date');
+  if (isPastDate(date)) throw badRequest('Appointment date cannot be in the past');
+  return { appointmentDate: date, slotTime: requireSlot(slotTime) };
+};
+
+const assertSlotFree = (doctorId, appointmentDate, slotTime, excludeId) => {
+  const taken = db.getAppointments({ doctorId, date: appointmentDate })
+    .find(a => a.slotTime === slotTime && a.id !== excludeId && a.status !== 'cancelled');
+  if (taken) throw conflict(`Slot ${slotTime} on ${appointmentDate} is already booked for this doctor`);
+};
+
+export const getAppointments = handler((req, res) => {
+  const { doctorId, date } = req.query;
+  const status = appointmentStatus(req.query.status);
+  res.json({ appointments: db.getAppointments({ doctorId, date, status }) });
+});
+
+export const createAppointment = handler((req, res) => {
   const { patientName, patientPhone, patientAge, patientGender, doctorId, appointmentDate, slotTime, reason } = req.body;
-
   if (!patientName || !patientPhone || !doctorId || !appointmentDate || !slotTime) {
-    return res.status(400).json({ error: 'Missing required appointment fields' });
+    throw badRequest('Missing required appointment fields');
   }
 
-  const doctor = db.getDoctorById(doctorId);
-  if (!doctor) {
-    return res.status(404).json({ error: 'Doctor not found' });
-  }
+  const doctor = db.getDoctorById(requireId(doctorId, 'Doctor ID'));
+  if (!doctor) throw notFound('Doctor not found');
+
+  const schedule = requireSchedule(appointmentDate, slotTime);
+  assertSlotFree(doctor.id, schedule.appointmentDate, schedule.slotTime);
 
   const newApt = db.createAppointment({
-    patientName,
-    patientPhone,
-    patientAge: Number(patientAge) || null,
-    patientGender: patientGender || 'Other',
-    doctorId,
+    patientName: requireText(patientName, 'Patient name', 80),
+    patientPhone: requirePhone(patientPhone),
+    patientAge: optionalAge(patientAge),
+    patientGender: optionalGender(patientGender),
+    doctorId: doctor.id,
     doctorName: doctor.name,
     specialization: doctor.specialization,
     roomNumber: doctor.roomNumber,
-    appointmentDate,
-    slotTime,
-    reason: reason || 'General Consultation'
+    ...schedule,
+    reason: optionalText(reason, 'General Consultation', 300)
   });
 
-  // Trigger SMS & WhatsApp confirmation
   notificationService.notifyBookingConfirmed(newApt, doctor);
+  emit(req, 'APPOINTMENT_BOOKED', newApt);
 
-  // If Socket.IO is initialized, emit booking event
-  if (req.app.get('io')) {
-    req.app.get('io').emit('APPOINTMENT_BOOKED', newApt);
-  }
+  res.status(201).json({ message: 'Appointment booked successfully!', appointment: newApt });
+});
 
-  res.status(201).json({
-    message: 'Appointment booked successfully!',
-    appointment: newApt
-  });
-};
-
-export const checkInAppointment = (req, res) => {
-  const apt = db.getAppointmentById(req.params.id);
-  if (!apt) return res.status(404).json({ error: 'Appointment not found' });
-
-  if (apt.status === 'checked_in') {
-    return res.status(400).json({ error: 'Patient is already checked in' });
-  }
+export const checkInAppointment = handler((req, res) => {
+  const apt = loadAppointment(req.params.id);
+  if (apt.status === 'checked_in') throw conflict('Patient is already checked in');
+  if (apt.status !== 'booked') throw conflict(`Cannot check in a ${apt.status} appointment`);
 
   const doctor = db.getDoctorById(apt.doctorId);
+  if (!doctor) throw notFound('Doctor for this appointment no longer exists');
 
-  // Generate Queue Token for this checked-in patient
-  const token = db.createQueueToken({
+  const token = issueToken({
     tokenType: 'appointment',
     patientName: apt.patientName,
     patientPhone: apt.patientPhone,
@@ -66,76 +76,48 @@ export const checkInAppointment = (req, res) => {
     patientGender: apt.patientGender,
     reason: apt.reason,
     doctorId: apt.doctorId,
-    roomNumber: doctor ? doctor.roomNumber : 'Room 101',
     appointmentId: apt.id
-  });
+  }, doctor);
 
-  // Update appointment record
   const updatedApt = db.updateAppointment(apt.id, {
     status: 'checked_in',
     tokenNumber: token.tokenNumber,
     displayToken: token.displayToken
   });
 
-  // Dispatch WhatsApp Token link
-  if (doctor) {
-    notificationService.notifyTokenGenerated(token, doctor);
-  }
+  emit(req, 'PATIENT_CHECKED_IN', { appointment: updatedApt, token });
+  queueUpdated(req, 'patient_checked_in', apt.doctorId, token.id);
 
-  // Real-time broadcast
-  if (req.app.get('io')) {
-    const io = req.app.get('io');
-    io.emit('PATIENT_CHECKED_IN', { appointment: updatedApt, token });
-    io.emit('QUEUE_UPDATED', { doctorId: apt.doctorId });
-  }
+  res.json({ message: 'Patient checked in successfully. Token generated!', appointment: updatedApt, token });
+});
 
-  res.json({
-    message: 'Patient checked in successfully. Token generated!',
-    appointment: updatedApt,
-    token
-  });
-};
-
-export const cancelAppointment = (req, res) => {
-  const apt = db.getAppointmentById(req.params.id);
-  if (!apt) return res.status(404).json({ error: 'Appointment not found' });
+export const cancelAppointment = handler((req, res) => {
+  const apt = loadAppointment(req.params.id);
+  if (apt.status !== 'booked') throw conflict(`Cannot cancel a ${apt.status} appointment`);
 
   const updated = db.updateAppointment(apt.id, { status: 'cancelled' });
-
-  if (req.app.get('io')) {
-    req.app.get('io').emit('APPOINTMENT_CANCELLED', updated);
-  }
+  emit(req, 'APPOINTMENT_CANCELLED', updated);
 
   res.json({ message: 'Appointment cancelled', appointment: updated });
-};
+});
 
-export const rescheduleAppointment = (req, res) => {
+export const rescheduleAppointment = handler((req, res) => {
   const { appointmentDate, slotTime } = req.body;
-  if (!appointmentDate || !slotTime) {
-    return res.status(400).json({ error: 'New appointment date and slot time are required' });
+  if (!appointmentDate || !slotTime) throw badRequest('New appointment date and slot time are required');
+
+  const apt = loadAppointment(req.params.id);
+  if (apt.status !== 'booked' && apt.status !== 'cancelled') {
+    throw conflict(`Cannot reschedule appointment in '${apt.status}' state`);
   }
 
-  const apt = db.getAppointmentById(req.params.id);
-  if (!apt) return res.status(404).json({ error: 'Appointment not found' });
+  const schedule = requireSchedule(appointmentDate, slotTime);
+  assertSlotFree(apt.doctorId, schedule.appointmentDate, schedule.slotTime, apt.id);
 
-  if (apt.status === 'checked_in' || apt.status === 'completed') {
-    return res.status(400).json({ error: `Cannot reschedule appointment in '${apt.status}' state` });
-  }
-
-  const updated = db.updateAppointment(apt.id, {
-    appointmentDate,
-    slotTime,
-    status: 'booked'
-  });
+  const updated = db.updateAppointment(apt.id, { ...schedule, status: 'booked' });
 
   const doctor = db.getDoctorById(updated.doctorId);
-  if (doctor) {
-    notificationService.notifyBookingConfirmed(updated, doctor);
-  }
-
-  if (req.app.get('io')) {
-    req.app.get('io').emit('APPOINTMENT_RESCHEDULED', updated);
-  }
+  if (doctor) notificationService.notifyBookingConfirmed(updated, doctor);
+  emit(req, 'APPOINTMENT_RESCHEDULED', updated);
 
   res.json({ message: 'Appointment rescheduled successfully!', appointment: updated });
-};
+});

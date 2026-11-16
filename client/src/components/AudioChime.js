@@ -1,102 +1,113 @@
-// Web Audio API Hospital / Airport Chime Synthesizer
 class SoundController {
   constructor() {
     this.audioCtx = null;
     this.isMuted = false;
     this.speechEnabled = true;
+    this.unlocked = false;
+    this.speechTimer = null;
+  }
+
+  unlock() {
+    this.unlocked = true;
+    const ctx = this.getAudioContext();
+    if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
   }
 
   getAudioContext() {
-    if (!this.audioCtx && typeof window !== 'undefined') {
+    if (typeof window === 'undefined' || !this.unlocked) return null;
+    if (!this.audioCtx) {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
-      if (AudioContext) {
+      if (!AudioContext) return null;
+      try {
         this.audioCtx = new AudioContext();
+      } catch {
+        return null;
       }
-    }
-    if (this.audioCtx && this.audioCtx.state === 'suspended') {
-      this.audioCtx.resume();
     }
     return this.audioCtx;
   }
 
   toggleMute() {
     this.isMuted = !this.isMuted;
+    if (this.isMuted) this.stopSpeech();
     return this.isMuted;
   }
 
   toggleSpeech() {
     this.speechEnabled = !this.speechEnabled;
+    if (!this.speechEnabled) this.stopSpeech();
     return this.speechEnabled;
   }
 
-  // Play pleasant two-tone hospital chime (e.g. F5 -> C5 or A5 -> F5)
-  playChime() {
-    if (this.isMuted) return;
-
-    try {
-      const ctx = this.getAudioContext();
-      if (!ctx) return;
-
-      const now = ctx.currentTime;
-
-      // Note 1: 587.33 Hz (D5)
-      const osc1 = ctx.createOscillator();
-      const gain1 = ctx.createGain();
-      osc1.type = 'sine';
-      osc1.frequency.setValueAtTime(587.33, now);
-
-      gain1.gain.setValueAtTime(0.001, now);
-      gain1.gain.exponentialRampToValueAtTime(0.3, now + 0.05);
-      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
-
-      osc1.connect(gain1);
-      gain1.connect(ctx.destination);
-
-      osc1.start(now);
-      osc1.stop(now + 0.65);
-
-      // Note 2: 880 Hz (A5)
-      const osc2 = ctx.createOscillator();
-      const gain2 = ctx.createGain();
-      osc2.type = 'sine';
-      osc2.frequency.setValueAtTime(880, now + 0.25);
-
-      gain2.gain.setValueAtTime(0.001, now + 0.25);
-      gain2.gain.exponentialRampToValueAtTime(0.35, now + 0.3);
-      gain2.gain.exponentialRampToValueAtTime(0.001, now + 1.2);
-
-      osc2.connect(gain2);
-      gain2.connect(ctx.destination);
-
-      osc2.start(now + 0.25);
-      osc2.stop(now + 1.25);
-    } catch (err) {
-      console.warn('Audio chime playback failed:', err);
+  stopSpeech() {
+    clearTimeout(this.speechTimer);
+    this.speechTimer = null;
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        /* ignore */
+      }
     }
   }
 
-  // Announce Token via browser Speech Synthesis
+  playTone(ctx, frequency, start, peak, attack, release) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(frequency, start);
+    gain.gain.setValueAtTime(0.001, start);
+    gain.gain.exponentialRampToValueAtTime(peak, start + attack);
+    gain.gain.exponentialRampToValueAtTime(0.001, start + release);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(start);
+    osc.stop(start + release + 0.05);
+  }
+
+  playChime() {
+    if (this.isMuted) return;
+    const ctx = this.getAudioContext();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+
+    try {
+      const now = ctx.currentTime;
+      this.playTone(ctx, 587.33, now, 0.3, 0.05, 0.6);
+      this.playTone(ctx, 880, now + 0.25, 0.35, 0.05, 0.95);
+    } catch {
+      /* audio unavailable, stay silent */
+    }
+  }
+
   announceToken(displayToken, doctorName, roomNumber) {
     if (this.isMuted) return;
-
-    // First ring chime
     this.playChime();
 
-    if (!this.speechEnabled || typeof window === 'undefined' || !window.speechSynthesis) {
+    if (
+      !this.speechEnabled ||
+      typeof window === 'undefined' ||
+      !window.speechSynthesis ||
+      typeof window.SpeechSynthesisUtterance !== 'function'
+    ) {
       return;
     }
 
-    setTimeout(() => {
+    clearTimeout(this.speechTimer);
+    this.speechTimer = setTimeout(() => {
+      this.speechTimer = null;
       try {
-        const text = `Token number ${displayToken}. Please proceed to ${roomNumber}, ${doctorName}.`;
-        const utterance = new SpeechSynthesisUtterance(text);
+        const where = [roomNumber, doctorName].filter(Boolean).join(', ');
+        const utterance = new SpeechSynthesisUtterance(
+          `Token number ${displayToken}.${where ? ` Please proceed to ${where}.` : ''}`
+        );
         utterance.rate = 0.95;
         utterance.pitch = 1.05;
         utterance.volume = 0.9;
-        window.speechSynthesis.cancel(); // cancel pending speech
+        window.speechSynthesis.cancel();
         window.speechSynthesis.speak(utterance);
-      } catch (err) {
-        console.warn('Speech synthesis failed:', err);
+      } catch {
+        /* speech unavailable */
       }
     }, 600);
   }

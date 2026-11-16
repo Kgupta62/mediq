@@ -1,5 +1,7 @@
 import { db } from '../config/db.js';
 
+const TRACK_BASE_URL = (process.env.CLIENT_URL || 'http://localhost:5173').split(',')[0].trim().replace(/\/$/, '');
+
 class NotificationService {
   constructor() {
     this.io = null;
@@ -9,41 +11,34 @@ class NotificationService {
     this.io = io;
   }
 
-  sendSMS({ phone, message, type = 'SMS_ALERT' }) {
-    const record = db.logNotification({
-      recipientPhone: phone,
-      channel: 'SMS',
-      messageType: type,
-      content: message,
-      status: 'delivered'
-    });
-
-    console.log(`\x1b[36m[SMS DISPATCH]\x1b[0m To: ${phone} | ${message}`);
-
-    if (this.io) {
-      this.io.emit('NOTIFICATION_DISPATCHED', record);
+  dispatch(channel, { phone, message, type }, label) {
+    let record;
+    try {
+      record = db.logNotification({
+        recipientPhone: phone,
+        channel,
+        messageType: type,
+        content: message,
+        status: 'delivered'
+      });
+    } catch (err) {
+      console.error(`\x1b[31m[${label} FAILED]\x1b[0m`, err.message);
+      return null;
     }
+
+    console.log(`\x1b[36m[${label}]\x1b[0m To: ${phone} | ${message}`);
+    this.io?.emit('NOTIFICATION_DISPATCHED', record);
     return record;
+  }
+
+  sendSMS({ phone, message, type = 'SMS_ALERT' }) {
+    return this.dispatch('SMS', { phone, message, type }, 'SMS DISPATCH');
   }
 
   sendWhatsApp({ phone, message, type = 'WHATSAPP_UPDATE' }) {
-    const record = db.logNotification({
-      recipientPhone: phone,
-      channel: 'WHATSAPP',
-      messageType: type,
-      content: message,
-      status: 'delivered'
-    });
-
-    console.log(`\x1b[32m[WHATSAPP CLOUD]\x1b[0m To: ${phone} | ${message}`);
-
-    if (this.io) {
-      this.io.emit('NOTIFICATION_DISPATCHED', record);
-    }
-    return record;
+    return this.dispatch('WHATSAPP', { phone, message, type }, 'WHATSAPP CLOUD');
   }
 
-  // Preset notification triggers based on the 12-week spec
   notifyBookingConfirmed(appointment, doctor) {
     const msg = `🏥 *MediQ Clinic*: Hello ${appointment.patientName}, your appointment with ${doctor.name} (${doctor.specialization}) is confirmed for ${appointment.appointmentDate} at ${appointment.slotTime}. Booking ID: ${appointment.appointmentNumber}. Please arrive 10 mins early.`;
     this.sendWhatsApp({ phone: appointment.patientPhone, message: msg, type: 'BOOKING_CONFIRMED' });
@@ -51,7 +46,7 @@ class NotificationService {
   }
 
   notifyTokenGenerated(token, doctor) {
-    const msg = `🎫 *MediQ Clinic*: Token Generated! Your Token is *${token.displayToken}* for ${doctor.name}, ${token.roomNumber}. Track your real-time queue position on your phone here: http://localhost:5173/track/${token.tokenNumber}`;
+    const msg = `🎫 *MediQ Clinic*: Token Generated! Your Token is *${token.displayToken}* for ${doctor.name}, ${token.roomNumber}. Track your real-time queue position on your phone here: ${TRACK_BASE_URL}/track/${token.tokenNumber}`;
     this.sendWhatsApp({ phone: token.patientPhone, message: msg, type: 'TOKEN_GENERATED' });
   }
 

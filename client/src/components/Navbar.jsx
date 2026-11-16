@@ -1,9 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import {
-  Activity,
   Calendar,
   Ticket,
   Tv,
@@ -13,250 +12,309 @@ import {
   Volume2,
   VolumeX,
   RotateCcw,
-  UserCheck,
-  ChevronDown,
-  Sparkles,
+  UserCircle2,
   Wifi,
-  WifiOff
+  WifiOff,
+  LogOut,
+  Bell,
+  Check
 } from 'lucide-react';
+
+const navItems = [
+  { id: 'book', label: 'Book', fullLabel: 'Book appointment', icon: Calendar },
+  { id: 'track', label: 'Track', fullLabel: 'Track queue', icon: Ticket, live: true },
+  { id: 'tv', label: 'TV', fullLabel: 'Waiting room TV', icon: Tv },
+  { id: 'reception', label: 'Reception', fullLabel: 'Reception desk', icon: Users },
+  { id: 'doctor', label: 'Doctor', fullLabel: 'Doctor desk', icon: Stethoscope },
+  { id: 'analytics', label: 'Analytics', fullLabel: 'Analytics', icon: BarChart3 }
+];
+
+const roles = [
+  { key: 'reception', name: 'Reception Desk', detail: 'Sunita Sharma', icon: Users },
+  { key: 'doc-1', name: 'Dr. Rajesh Sharma', detail: 'Room 101 · Cardiology', icon: Stethoscope },
+  { key: 'doc-2', name: 'Dr. Priya Patel', detail: 'Room 102 · General Medicine', icon: Stethoscope }
+];
 
 export const Navbar = ({ activeTab, setActiveTab, clinic }) => {
   const { isConnected, isAudioMuted, toggleSound, testChime } = useSocket();
   const { user, loginAsReceptionist, loginAsDoctor, logout } = useAuth();
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetError, setResetError] = useState('');
+  const dropdownRef = useRef(null);
+  const resetRef = useRef(null);
 
-  const handleResetData = async () => {
-    if (confirm('Reset system with fresh realistic pilot clinic data?')) {
-      setResetting(true);
-      try {
-        await api.resetDemoData();
-      } catch (err) {
-        console.error('Reset failed:', err);
-      } finally {
-        setResetting(false);
-      }
+  useEffect(() => {
+    if (!roleDropdownOpen) return;
+    const onClick = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) setRoleDropdownOpen(false);
+    };
+    const onKey = (e) => e.key === 'Escape' && setRoleDropdownOpen(false);
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [roleDropdownOpen]);
+
+  useEffect(() => {
+    if (!confirmReset) return;
+    const onClick = (e) => {
+      if (resetRef.current && !resetRef.current.contains(e.target)) setConfirmReset(false);
+    };
+    const onKey = (e) => e.key === 'Escape' && setConfirmReset(false);
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [confirmReset]);
+
+  const go = (tab) => {
+    setActiveTab(tab);
+    setRoleDropdownOpen(false);
+  };
+
+  const selectRole = (key) => {
+    if (key === 'reception') {
+      loginAsReceptionist();
+      go('reception');
+    } else {
+      loginAsDoctor(key);
+      go('doctor');
     }
   };
 
-  const navItems = [
-    { id: 'book', label: 'Book Appointment', icon: Calendar, badge: null },
-    { id: 'track', label: 'Track Live Queue', icon: Ticket, badge: 'Live' },
-    { id: 'tv', label: 'Waiting Room TV', icon: Tv, badge: 'Signage' },
-    { id: 'reception', label: 'Reception Desk', icon: Users, badge: null },
-    { id: 'doctor', label: 'Doctor OPD Desk', icon: Stethoscope, badge: null },
-    { id: 'analytics', label: 'Analytics & Viva Report', icon: BarChart3, badge: 'KPI' }
-  ];
+  const askReset = () => {
+    setRoleDropdownOpen(false);
+    setResetError('');
+    setConfirmReset(true);
+  };
+
+  const handleResetData = async () => {
+    setResetting(true);
+    setResetError('');
+    try {
+      await api.resetDemoData();
+      setConfirmReset(false);
+    } catch (err) {
+      setResetError(err.message || 'Reset failed. Try again.');
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  const hours = clinic?.openTime && clinic?.closeTime ? `OPD ${clinic.openTime} to ${clinic.closeTime}` : null;
+  const activeIndex = Math.max(0, navItems.findIndex((i) => i.id === activeTab));
+  const iconBtn = 'w-11 h-11 flex items-center justify-center rounded-full transition-colors hover:bg-fill';
 
   return (
-    <header className="sticky top-0 z-40 w-full backdrop-blur-xl bg-slate-950/80 border-b border-slate-800/80 transition-all">
-      {/* Top Advisory Banner */}
-      <div className="bg-gradient-to-r from-cyan-950/70 via-slate-900 to-indigo-950/70 py-1 px-4 text-center border-b border-white/5 text-[11px] text-slate-300 flex items-center justify-between">
-        <div className="flex items-center gap-2 mx-auto">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
-          <span className="font-semibold text-cyan-300">12-Week Pilot Architecture</span>
-          <span className="text-slate-500">|</span>
-          <span className="text-slate-300 truncate max-w-lg">{clinic?.activeNotice || 'OPD Queue Active. Emergency and Senior patients are prioritized.'}</span>
-        </div>
-
-        <div className="flex items-center gap-3 text-[10px] text-slate-400">
-          <span className="flex items-center gap-1">
-            {isConnected ? (
-              <span className="text-emerald-400 flex items-center gap-1 font-mono"><Wifi size={11} /> 100% Real-time</span>
-            ) : (
-              <span className="text-rose-400 flex items-center gap-1 font-mono"><WifiOff size={11} /> Reconnecting</span>
-            )}
-          </span>
-        </div>
-      </div>
-
-      {/* Main Header Bar */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between h-16">
-        {/* Brand & Clinic Title */}
-        <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab('book')}>
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-cyan-950/60 border border-cyan-400/30">
-            <Activity className="text-white" size={22} />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-extrabold text-base tracking-tight text-white flex items-center gap-1.5">
-                MediQ
-              </span>
-              <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 uppercase tracking-wider">
-                Smart OPD
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-400 truncate max-w-[200px] sm:max-w-xs font-normal">
-              {clinic?.tagline || 'Hospital Appointment & Real-Time Queue Management'}
-            </p>
-          </div>
-        </div>
-
-        {/* Desktop Navigation Links */}
-        <nav className="hidden lg:flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => setActiveTab(item.id)}
-                className={`flex items-center gap-2 py-2 px-3 rounded-lg text-xs font-medium transition-all relative ${
-                  isActive
-                    ? 'bg-cyan-600 text-white shadow-md shadow-cyan-900/50 font-bold'
-                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
-                }`}
-              >
-                <Icon size={15} />
-                <span>{item.label}</span>
-                {item.badge && (
-                  <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded-full uppercase ${
-                    isActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-cyan-400 border border-cyan-500/20'
-                  }`}>
-                    {item.badge}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </nav>
-
-        {/* Right Action Tools */}
-        <div className="flex items-center gap-2">
-          {/* Audio Chime Controller */}
-          <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-lg p-1">
-            <button
-              onClick={toggleSound}
-              title={isAudioMuted ? 'Unmute Audio Chime' : 'Mute Audio Chime'}
-              className={`p-1.5 rounded-md text-xs transition ${
-                isAudioMuted ? 'text-rose-400 bg-rose-950/30' : 'text-cyan-400 hover:bg-slate-800'
-              }`}
-            >
-              {isAudioMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
-            </button>
-            <button
-              onClick={testChime}
-              title="Test Hospital Chime Sound"
-              className="text-[10px] font-semibold text-slate-300 hover:text-white px-2 py-1 hover:bg-slate-800 rounded transition hidden sm:inline-block"
-            >
-              Test Chime
-            </button>
-          </div>
-
-          {/* Reset Demo Data Button */}
+    <>
+      <header className="sticky top-0 z-40 w-full glass border-x-0 border-t-0 rounded-none shadow-none">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 flex items-center justify-between gap-3 h-[52px] lg:h-14">
           <button
-            onClick={handleResetData}
-            disabled={resetting}
-            title="Reset with realistic demo traffic"
-            className="flex items-center gap-1.5 py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white text-xs border border-slate-800 transition disabled:opacity-50"
+            type="button"
+            onClick={() => go('book')}
+            className="flex items-center gap-2.5 rounded-lg min-w-0 shrink-0 min-h-[44px]"
+            aria-label="MediQ home"
           >
-            <RotateCcw size={13} className={resetting ? 'animate-spin text-cyan-400' : ''} />
-            <span className="hidden md:inline">Reset Demo</span>
+            <span className="icon-tile w-7 h-7 rounded-[7px]" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M13.5 5h-3v5.5H5v3h5.5V19h3v-5.5H19v-3h-5.5z" /></svg>
+            </span>
+            <span className="text-headline text-label">MediQ</span>
           </button>
 
-          {/* Quick Role Switcher Dropdown */}
-          <div className="relative">
+          <nav aria-label="Sections" className="hidden lg:block">
+            <div className="segmented">
+              <span
+                className="segmented-thumb"
+                aria-hidden="true"
+                style={{ width: `calc((100% - 4px) / ${navItems.length})`, left: `calc(2px + (100% - 4px) * ${activeIndex} / ${navItems.length})` }}
+              />
+              {navItems.map((item) => {
+                const isActive = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    aria-current={isActive ? 'page' : undefined}
+                    onClick={() => go(item.id)}
+                    className="segmented-item flex-1"
+                  >
+                    {item.label}
+                    {item.live && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-green" aria-hidden="true" />
+                    )}
+                    {item.live && <span className="sr-only">live updates</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </nav>
+
+          <div className="flex items-center gap-1 shrink-0">
             <button
-              onClick={() => setRoleDropdownOpen(!roleDropdownOpen)}
-              className="flex items-center gap-2 py-1.5 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-xs font-medium text-slate-200 border border-slate-800 transition"
+              type="button"
+              onClick={toggleSound}
+              aria-pressed={isAudioMuted}
+              aria-label={isAudioMuted ? 'Unmute chime' : 'Mute chime'}
+              title={isAudioMuted ? 'Unmute chime' : 'Mute chime'}
+              className={`${iconBtn} ${isAudioMuted ? 'text-red' : 'text-accent'}`}
             >
-              <UserCheck size={14} className="text-cyan-400" />
-              <span className="truncate max-w-[90px] sm:max-w-none">
-                {user ? user.name : 'Guest Patient'}
-              </span>
-              <ChevronDown size={13} className="text-slate-500" />
+              {isAudioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
             </button>
-
-            {roleDropdownOpen && (
-              <div
-                className="absolute right-0 mt-2 w-64 rounded-xl bg-slate-900 border border-slate-700 shadow-2xl p-2 z-50 animate-scale-in"
-                onClick={() => setRoleDropdownOpen(false)}
+            <button
+              type="button"
+              onClick={testChime}
+              title="Play test chime"
+              aria-label="Play test chime"
+              className={`${iconBtn} text-accent hidden sm:flex`}
+            >
+              <Bell size={18} />
+            </button>
+            <div className="relative" ref={resetRef}>
+              <button
+                type="button"
+                onClick={() => (confirmReset ? setConfirmReset(false) : askReset())}
+                disabled={resetting}
+                title="Reset demo data"
+                aria-label="Reset demo data"
+                aria-haspopup="dialog"
+                aria-expanded={confirmReset}
+                className={`${iconBtn} text-accent hidden sm:flex disabled:opacity-40 ${confirmReset ? 'bg-fill' : ''}`}
               >
-                <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800">
-                  Quick Demo Switcher
-                </div>
-
-                <div className="py-1 space-y-1">
-                  <button
-                    onClick={() => {
-                      loginAsReceptionist();
-                      setActiveTab('reception');
-                    }}
-                    className="w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs hover:bg-slate-800 text-slate-200"
-                  >
-                    <span>👩‍💼</span>
-                    <div>
-                      <p className="font-semibold text-white">Reception Desk</p>
-                      <p className="text-[10px] text-slate-400">Sunita Sharma</p>
-                    </div>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      loginAsDoctor('doc-1');
-                      setActiveTab('doctor');
-                    }}
-                    className="w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs hover:bg-slate-800 text-slate-200"
-                  >
-                    <span>👨‍⚕️</span>
-                    <div>
-                      <p className="font-semibold text-white">Dr. Rajesh Sharma</p>
-                      <p className="text-[10px] text-slate-400">Room 101 - Cardiology</p>
-                    </div>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      loginAsDoctor('doc-2');
-                      setActiveTab('doctor');
-                    }}
-                    className="w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs hover:bg-slate-800 text-slate-200"
-                  >
-                    <span>👩‍⚕️</span>
-                    <div>
-                      <p className="font-semibold text-white">Dr. Priya Patel</p>
-                      <p className="text-[10px] text-slate-400">Room 102 - Gen Medicine</p>
-                    </div>
-                  </button>
-                </div>
-
-                {user && (
-                  <div className="border-t border-slate-800 pt-1 mt-1">
-                    <button
-                      onClick={logout}
-                      className="w-full text-left px-3 py-1.5 rounded-lg text-xs text-rose-400 hover:bg-rose-950/30"
-                    >
-                      Log out
+                <RotateCcw size={18} className={resetting ? 'animate-spin' : ''} aria-hidden="true" />
+              </button>
+              {confirmReset && (
+                <div
+                  role="dialog"
+                  aria-labelledby="reset-title"
+                  className="popover bg-surface absolute right-0 mt-2 w-72 z-50 p-4 animate-scale-in origin-top-right"
+                >
+                  <p id="reset-title" className="text-headline text-label">Reset demo data?</p>
+                  <p className="text-footnote text-secondary mt-1">
+                    All bookings and queue tokens go back to the demo starting point. This cannot be undone.
+                  </p>
+                  {resetError && <p role="alert" className="text-footnote text-red mt-2">{resetError}</p>}
+                  <div className="flex gap-2 mt-3">
+                    <button type="button" onClick={() => setConfirmReset(false)} disabled={resetting} className="btn-secondary btn-sm flex-1">
+                      Cancel
+                    </button>
+                    <button type="button" onClick={handleResetData} disabled={resetting} className="btn-danger btn-sm flex-1" autoFocus>
+                      {resetting ? 'Resetting' : 'Reset'}
                     </button>
                   </div>
-                )}
-              </div>
-            )}
+                </div>
+              )}
+            </div>
+
+            <div className="relative" ref={dropdownRef}>
+              <button
+                type="button"
+                onClick={() => setRoleDropdownOpen(!roleDropdownOpen)}
+                aria-haspopup="menu"
+                aria-expanded={roleDropdownOpen}
+                aria-label={`Switch role, currently ${user ? user.name : 'Guest'}`}
+                className={`${iconBtn} text-accent ${roleDropdownOpen ? 'bg-fill' : ''}`}
+              >
+                <UserCircle2 size={22} aria-hidden="true" />
+              </button>
+
+              {roleDropdownOpen && (
+                <div
+                  role="menu"
+                  className="popover bg-surface absolute right-0 mt-2 w-72 z-50 animate-scale-in origin-top-right"
+                >
+                  <div className="px-3 pt-2 pb-1.5">
+                    <p className="text-footnote text-secondary">Signed in as</p>
+                    <p className="text-headline text-label truncate">{user ? user.name : 'Guest'}</p>
+                  </div>
+                  <div className="divider mx-3 my-1" />
+                  <p className="section-title px-3 pt-2 pb-1">Switch role</p>
+                  {roles.map((r) => {
+                    const Icon = r.icon;
+                    const active = user?.name === r.name;
+                    return (
+                      <button
+                        key={r.key}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => selectRole(r.key)}
+                        aria-current={active ? 'true' : undefined}
+                        className="menu-item"
+                      >
+                        <span className="w-8 h-8 rounded-lg bg-fill flex items-center justify-center text-accent shrink-0" aria-hidden="true">
+                          <Icon size={16} />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-subheadline font-medium text-label truncate">{r.name}</span>
+                          <span className="block text-footnote text-secondary truncate">{r.detail}</span>
+                        </span>
+                        {active && <Check size={16} className="text-accent shrink-0" aria-hidden="true" />}
+                      </button>
+                    );
+                  })}
+                  <div className="divider mx-3 my-1" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={askReset}
+                    disabled={resetting}
+                    className="menu-item"
+                  >
+                    <RotateCcw size={16} className={`text-accent ${resetting ? 'animate-spin' : ''}`} aria-hidden="true" />
+                    <span className="text-subheadline">Reset demo data</span>
+                  </button>
+                  {user && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => { logout(); setRoleDropdownOpen(false); }}
+                      className="menu-item text-red"
+                    >
+                      <LogOut size={16} aria-hidden="true" />
+                      <span className="text-subheadline text-red">Log out</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Mobile Tab Bar */}
-      <div className="lg:hidden flex items-center gap-1 overflow-x-auto px-3 py-2 bg-slate-900/60 border-t border-slate-800/60">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-1.5 -mt-0.5 flex items-center justify-between gap-3 text-footnote text-secondary">
+          <span className="truncate">{clinic?.activeNotice || 'OPD queue active. Emergency and senior patients are prioritised.'}</span>
+          <span className="flex items-center gap-3 shrink-0 tabular">
+            {hours && <span className="hidden sm:inline">{hours}</span>}
+            <span className={`flex items-center gap-1 ${isConnected ? 'text-green' : 'text-orange'}`}>
+              {isConnected ? <Wifi size={12} aria-hidden="true" /> : <WifiOff size={12} aria-hidden="true" />}
+              {isConnected ? 'Live' : 'Reconnecting'}
+            </span>
+          </span>
+        </div>
+      </header>
+
+      <nav aria-label="Sections" className="tab-bar glass lg:hidden">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
           return (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={`flex items-center gap-1.5 py-1.5 px-3 rounded-lg text-xs whitespace-nowrap transition-all ${
-                isActive
-                  ? 'bg-cyan-600 text-white font-bold'
-                  : 'text-slate-400 hover:text-white bg-slate-800/40'
-              }`}
+              type="button"
+              aria-current={isActive ? 'page' : undefined}
+              onClick={() => go(item.id)}
+              className="tab-bar-item"
             >
-              <Icon size={14} />
+              <Icon size={22} strokeWidth={isActive ? 2.25 : 1.75} aria-hidden="true" />
               <span>{item.label}</span>
             </button>
           );
         })}
-      </div>
-    </header>
+      </nav>
+    </>
   );
 };

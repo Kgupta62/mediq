@@ -1,12 +1,151 @@
-import React, { useState, useEffect } from 'react';
-import { X, User, Clock, Calendar, FileText, Stethoscope, HeartPulse, Search, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, User, Calendar, FileText, Stethoscope, Search, AlertTriangle, Inbox, Loader2, CheckCircle2, XCircle, Clock } from 'lucide-react';
 import { api } from '../services/api';
+
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])';
+
+const useModalBehavior = (isOpen, onClose, panelRef) => {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const node = panelRef.current;
+    const prevOverflow = document.body.style.overflow;
+    const prevFocus = document.activeElement;
+    document.body.style.overflow = 'hidden';
+    (node?.querySelector('[data-autofocus]') || node?.querySelector(FOCUSABLE))?.focus();
+
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== 'Tab' || !node) return;
+      const items = Array.from(node.querySelectorAll(FOCUSABLE));
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+      prevFocus?.focus?.();
+    };
+  }, [isOpen, panelRef]);
+};
+
+const STATUS = {
+  completed: { cls: 'badge-emerald', icon: CheckCircle2 },
+  checked_in: { cls: 'badge-cyan', icon: CheckCircle2 },
+  cancelled: { cls: 'badge-rose', icon: XCircle }
+};
+
+const formatDate = (value, withTime) =>
+  new Date(value).toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    ...(withTime ? { hour: '2-digit', minute: '2-digit' } : {})
+  });
+
+const EmptyState = ({ title, hint }) => (
+  <div className="py-12 text-center">
+    <Inbox size={28} className="mx-auto text-tertiary mb-2" aria-hidden="true" />
+    <p className="text-headline text-label">{title}</p>
+    <p className="text-footnote text-secondary mt-1">{hint}</p>
+  </div>
+);
+
+const DetailRow = ({ label, children, className = '' }) => (
+  <div className={`list-row flex-col items-start gap-0.5 ${className}`}>
+    <dt className="text-caption uppercase tracking-wide text-secondary">{label}</dt>
+    <dd className="text-subheadline text-label w-full">{children}</dd>
+  </div>
+);
+
+const ConsultationCard = ({ c, onViewPrescription }) => (
+  <article className="list-inset">
+    <div className="list-row justify-between flex-wrap bg-surface-secondary">
+      <div className="flex items-center gap-2 flex-wrap min-w-0">
+        <Stethoscope size={15} className="text-accent shrink-0" aria-hidden="true" />
+        <span className="text-subheadline font-semibold text-label">{c.doctorName || 'Doctor'}</span>
+        <span className="badge-cyan font-medium">{c.specialization || 'OPD'}</span>
+      </div>
+      <time className="text-footnote text-secondary tabular">{formatDate(c.created_at, true)}</time>
+    </div>
+    <dl>
+      <DetailRow label="Diagnosis">{c.diagnosis}</DetailRow>
+      <DetailRow label="Vitals">
+        <span className="tabular">BP {c.vitals?.bp || 'n/a'} · Pulse {c.vitals?.pulse || 'n/a'} · Temp {c.vitals?.temp || 'n/a'}</span>
+      </DetailRow>
+      {c.prescription && (
+        <DetailRow label="Medications">
+          <span className="block whitespace-pre-wrap line-clamp-2 font-mono text-footnote">{c.prescription}</span>
+        </DetailRow>
+      )}
+    </dl>
+    {onViewPrescription && (
+      <div className="list-row justify-end">
+        <button
+          type="button"
+          onClick={() => onViewPrescription(c)}
+          aria-label={`View prescription from ${formatDate(c.created_at)}`}
+          className="btn-secondary btn-sm"
+        >
+          <FileText size={14} aria-hidden="true" /> View prescription
+        </button>
+      </div>
+    )}
+  </article>
+);
+
+const AppointmentRow = ({ a }) => {
+  const status = STATUS[a.status] || { cls: 'badge-amber', icon: Clock };
+  const StatusIcon = status.icon;
+  const statusLabel = String(a.status || '').replace('_', ' ');
+  return (
+    <div className="list-row justify-between flex-wrap">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Calendar size={15} className="text-accent shrink-0" aria-hidden="true" />
+          <strong className="text-subheadline font-semibold text-label tabular">{a.appointmentDate} at {a.slotTime}</strong>
+          <span className={status.cls}>
+            <StatusIcon size={12} aria-hidden="true" />
+            {statusLabel.charAt(0).toUpperCase() + statusLabel.slice(1)}
+          </span>
+        </div>
+        <p className="text-footnote text-secondary mt-0.5">
+          <span className="text-label">{a.doctorName}</span>{a.specialization ? ` (${a.specialization})` : ''}{a.roomNumber ? ` · ${a.roomNumber}` : ''}
+        </p>
+        {a.reason && <p className="text-footnote text-secondary mt-0.5 truncate">Reason: {a.reason}</p>}
+      </div>
+      <div className="text-right shrink-0">
+        <span className="block text-caption uppercase tracking-wide text-secondary">Ref</span>
+        <strong className="token-badge text-subheadline text-accent">{a.appointmentNumber}</strong>
+      </div>
+    </div>
+  );
+};
 
 export const PatientHistoryModal = ({ isOpen, onClose, phone, patientName, onViewPrescription }) => {
   const [history, setHistory] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const [searchPhone, setSearchPhone] = useState(phone || '');
-  const [activeTab, setActiveTab] = useState('consultations'); // 'consultations', 'appointments'
+  const [activeTab, setActiveTab] = useState('consultations');
+  const panelRef = useRef(null);
+
+  useModalBehavior(isOpen, onClose, panelRef);
 
   useEffect(() => {
     if (phone) {
@@ -19,10 +158,11 @@ export const PatientHistoryModal = ({ isOpen, onClose, phone, patientName, onVie
     if (!targetPhone) return;
     try {
       setLoading(true);
+      setError('');
       const data = await api.getPatientHistory(targetPhone);
       setHistory(data);
     } catch (err) {
-      console.error('Failed to load patient history:', err);
+      setError(err.message || 'Could not load patient records. Check the connection and retry.');
     } finally {
       setLoading(false);
     }
@@ -30,198 +170,142 @@ export const PatientHistoryModal = ({ isOpen, onClose, phone, patientName, onVie
 
   const handleSearch = (e) => {
     e.preventDefault();
-    loadHistory(searchPhone);
+    loadHistory(searchPhone.trim());
   };
 
   if (!isOpen) return null;
 
   const consultations = history?.consultations || [];
   const appointments = history?.appointments || [];
+  const tabs = [
+    { id: 'consultations', label: 'Prescriptions', count: consultations.length },
+    { id: 'appointments', label: 'Appointments', count: appointments.length }
+  ];
+  const activeIndex = Math.max(0, tabs.findIndex(t => t.id === activeTab));
+
+  const renderBody = () => {
+    if (loading) {
+      return (
+        <div className="py-12 flex flex-col items-center gap-2 text-secondary text-subheadline" role="status">
+          <Loader2 size={24} className="animate-spin text-accent" aria-hidden="true" />
+          Loading patient records...
+        </div>
+      );
+    }
+    if (error) {
+      return (
+        <div role="alert" className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-control bg-red-tint text-subheadline text-red">
+          <AlertTriangle size={16} className="shrink-0" aria-hidden="true" />
+          <span className="flex-1 py-1">{error}</span>
+          <button type="button" onClick={() => loadHistory(searchPhone)} className="btn-danger-soft btn-sm">Retry</button>
+        </div>
+      );
+    }
+    if (!history) {
+      return <EmptyState title="Find a patient" hint="Enter a phone number above to see past prescriptions and bookings." />;
+    }
+    if (activeTab === 'consultations') {
+      return consultations.length > 0
+        ? <div className="space-y-4">{consultations.map(c => <ConsultationCard key={c.id} c={c} onViewPrescription={onViewPrescription} />)}</div>
+        : <EmptyState title="No past prescriptions" hint="No prescriptions are on record for this phone number." />;
+    }
+    return appointments.length > 0
+      ? <div className="list-inset">{appointments.map(a => <AppointmentRow key={a.id} a={a} />)}</div>
+      : <EmptyState title="No past appointments" hint="No bookings are on record for this phone number." />;
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden my-8 flex flex-col max-h-[85vh]">
-        {/* Modal Header */}
-        <div className="bg-slate-800/80 px-6 py-4 flex items-center justify-between border-b border-slate-700">
-          <div className="flex items-center gap-2.5">
-            <span className="p-2 bg-cyan-500/20 text-cyan-400 rounded-xl">
-              <User size={18} />
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/35 animate-fade-in"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="patient-history-title"
+        className="glass w-full sm:max-w-2xl rounded-t-sheet sm:rounded-sheet overflow-hidden flex flex-col max-h-[92vh] sm:max-h-[85vh] animate-slide-up"
+      >
+        <div className="sm:hidden pt-2 flex justify-center" aria-hidden="true">
+          <span className="w-9 h-1.5 rounded-full bg-fill" />
+        </div>
+        <div className="px-4 sm:px-6 py-3.5 flex items-center justify-between gap-3 border-b border-separator">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="icon-tile" aria-hidden="true">
+              <User size={16} />
             </span>
-            <div>
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                Patient EHR & Visit History
-                {patientName && <span className="text-cyan-400 font-semibold">• {patientName}</span>}
+            <div className="min-w-0">
+              <h3 id="patient-history-title" className="text-headline text-label truncate">
+                Patient history{patientName ? `: ${patientName}` : ''}
               </h3>
-              <p className="text-xs text-slate-400 font-mono">
-                Records linked to: {searchPhone || 'None'}
+              <p className="text-footnote text-secondary tabular truncate">
+                {searchPhone ? `Records for ${searchPhone}` : 'No patient selected'}
               </p>
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-700 transition"
+            aria-label="Close"
+            className="btn-ghost btn-icon shrink-0"
           >
-            <X size={18} />
+            <X size={20} />
           </button>
         </div>
 
-        {/* Search Bar & Tabs */}
-        <div className="p-4 bg-slate-900 border-b border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <form onSubmit={handleSearch} className="flex items-center gap-2 w-full sm:w-auto">
-            <div className="relative flex-1 sm:w-64">
-              <Search size={14} className="absolute left-3 top-3 text-slate-500" />
+        <div className="px-4 sm:px-6 py-3 border-b border-separator flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <form onSubmit={handleSearch} className="flex items-center gap-2 w-full sm:w-auto sm:flex-1" role="search">
+            <div className="relative flex-1 sm:max-w-xs">
+              <Search size={16} className="absolute left-3 inset-y-0 my-auto text-tertiary" aria-hidden="true" />
               <input
-                type="text"
+                type="tel"
+                inputMode="tel"
+                data-autofocus
+                aria-label="Patient phone number"
                 value={searchPhone}
                 onChange={(e) => setSearchPhone(e.target.value)}
-                placeholder="Search by phone number..."
-                className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-cyan-500"
+                placeholder="Search by phone number"
+                className="input-base pl-10 tabular"
               />
             </div>
             <button
               type="submit"
-              className="py-2 px-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold transition"
+              disabled={loading || !searchPhone.trim()}
+              className="btn-primary"
             >
               Search
             </button>
           </form>
 
-          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs w-full sm:w-auto">
-            <button
-              onClick={() => setActiveTab('consultations')}
-              className={`py-1.5 px-3 rounded-lg font-semibold transition ${
-                activeTab === 'consultations' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Past Prescriptions ({consultations.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('appointments')}
-              className={`py-1.5 px-3 rounded-lg font-semibold transition ${
-                activeTab === 'appointments' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Appointments ({appointments.length})
-            </button>
+          <div role="tablist" aria-label="Record type" className="segmented">
+            <span
+              className="segmented-thumb"
+              aria-hidden="true"
+              style={{ width: `calc((100% - 4px) / ${tabs.length})`, left: `calc(2px + (100% - 4px) * ${activeIndex} / ${tabs.length})` }}
+            />
+            {tabs.map(({ id, label, count }) => {
+              const active = activeTab === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setActiveTab(id)}
+                  className={`segmented-item min-h-[36px] ${active ? 'text-label' : ''}`}
+                >
+                  {label}
+                  <span className={`tabular text-footnote ${active ? 'text-accent' : 'text-secondary'}`}>{count}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        {/* Content Body */}
-        <div className="p-6 overflow-y-auto space-y-4 flex-1">
-          {loading ? (
-            <div className="py-12 text-center text-slate-400 text-xs font-mono">
-              Fetching patient clinical records from SQLite database...
-            </div>
-          ) : activeTab === 'consultations' ? (
-            consultations.length > 0 ? (
-              <div className="space-y-3">
-                {consultations.map((c) => (
-                  <div key={c.id} className="p-4 rounded-xl bg-slate-950 border border-slate-800 hover:border-slate-700 transition">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-2 border-b border-slate-800 gap-2">
-                      <div className="flex items-center gap-2">
-                        <Stethoscope size={15} className="text-cyan-400" />
-                        <span className="text-xs font-bold text-white">{c.doctorName || 'Dr. Specialist'}</span>
-                        <span className="text-[10px] text-cyan-400 px-2 py-0.5 rounded bg-cyan-950/60 border border-cyan-800/40">
-                          {c.specialization || 'OPD'}
-                        </span>
-                      </div>
-                      <span className="text-[11px] text-slate-400 font-mono">
-                        {new Date(c.created_at).toLocaleDateString('en-IN', {
-                          day: 'numeric',
-                          month: 'short',
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </span>
-                    </div>
+        <div className="p-4 sm:p-6 overflow-y-auto flex-1 bg-grouped">{renderBody()}</div>
 
-                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                      <div>
-                        <span className="text-[10px] uppercase font-bold text-slate-500 block">Diagnosis</span>
-                        <p className="text-slate-200 font-medium mt-0.5">{c.diagnosis}</p>
-                      </div>
-                      <div>
-                        <span className="text-[10px] uppercase font-bold text-slate-500 block">Recorded Vitals</span>
-                        <p className="text-slate-300 font-mono text-[11px] mt-0.5">
-                          BP: {c.vitals?.bp || 'N/A'} • Pulse: {c.vitals?.pulse || 'N/A'} • Temp: {c.vitals?.temp || 'N/A'}°F
-                        </p>
-                      </div>
-                    </div>
-
-                    {c.prescription && (
-                      <div className="mt-2.5 pt-2 border-t border-slate-900 text-xs">
-                        <span className="text-[10px] uppercase font-bold text-slate-500 block">Medications Prescribed</span>
-                        <pre className="font-sans text-[11px] text-slate-300 whitespace-pre-wrap mt-0.5 line-clamp-2">
-                          {c.prescription}
-                        </pre>
-                      </div>
-                    )}
-
-                    {onViewPrescription && (
-                      <div className="mt-3 flex justify-end">
-                        <button
-                          onClick={() => onViewPrescription(c)}
-                          className="py-1 px-3 bg-slate-800 hover:bg-cyan-600 text-cyan-400 hover:text-white rounded-lg text-[11px] font-bold transition flex items-center gap-1 border border-slate-700"
-                        >
-                          <FileText size={13} /> View Full Rx Slip
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="py-12 text-center text-slate-500 text-xs flex flex-col items-center justify-center">
-                <AlertCircle size={28} className="text-slate-600 mb-2" />
-                No past consultation records found for this phone number.
-              </div>
-            )
-          ) : (
-            appointments.length > 0 ? (
-              <div className="space-y-3">
-                {appointments.map((a) => (
-                  <div key={a.id} className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <Calendar size={14} className="text-cyan-400" />
-                        <strong className="text-white">{a.appointmentDate} at {a.slotTime}</strong>
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                          a.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' :
-                          a.status === 'checked_in' ? 'bg-cyan-500/20 text-cyan-400' :
-                          a.status === 'cancelled' ? 'bg-rose-500/20 text-rose-400' : 'bg-amber-500/20 text-amber-400'
-                        }`}>
-                          {a.status}
-                        </span>
-                      </div>
-                      <p className="text-slate-400 mt-1">
-                        Doctor: <span className="text-slate-200">{a.doctorName}</span> ({a.specialization}) • {a.roomNumber}
-                      </p>
-                      <p className="text-slate-500 text-[11px] mt-0.5">Reason: {a.reason}</p>
-                    </div>
-
-                    <div className="font-mono text-slate-400 text-right">
-                      <span className="block text-[10px] uppercase text-slate-500">Booking Ref</span>
-                      <strong className="text-cyan-400">{a.appointmentNumber}</strong>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="py-12 text-center text-slate-500 text-xs flex flex-col items-center justify-center">
-                <AlertCircle size={28} className="text-slate-600 mb-2" />
-                No past appointments found for this phone number.
-              </div>
-            )
-          )}
-        </div>
-
-        {/* Modal Footer */}
-        <div className="bg-slate-800/60 px-6 py-3 flex justify-end border-t border-slate-800">
-          <button
-            onClick={onClose}
-            className="py-1.5 px-4 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs font-semibold transition"
-          >
+        <div className="px-4 sm:px-6 py-3 flex justify-end border-t border-separator pb-[max(12px,env(safe-area-inset-bottom))]">
+          <button type="button" onClick={onClose} className="btn-secondary">
             Close
           </button>
         </div>

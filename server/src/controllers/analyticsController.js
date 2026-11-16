@@ -1,31 +1,24 @@
 import { db } from '../config/db.js';
 import { seedInitialData } from '../seedData.js';
+import { handler, emit, queueUpdated } from '../utils/errors.js';
 
-export const getAnalytics = (req, res) => {
-  const data = db.getAnalytics();
-  res.json(data);
-};
+export const getAnalytics = handler((req, res) => {
+  res.json(db.getAnalytics());
+});
 
-export const getNotificationsLog = (req, res) => {
-  const limit = Number(req.query.limit) || 25;
-  const list = db.getNotifications(limit);
-  res.json({ notifications: list });
-};
+export const getNotificationsLog = handler((req, res) => {
+  const limit = Math.min(Math.max(Math.floor(Number(req.query.limit)) || 25, 1), 200);
+  res.json({ notifications: db.getNotifications(limit) });
+});
 
-export const resetData = (req, res) => {
-  seedInitialData();
-  const analytics = db.getAnalytics();
+export const resetData = handler((req, res) => {
+  seedInitialData({ force: true });
+  emit(req, 'DATA_RESET');
+  queueUpdated(req, 'data_reset');
+  res.json({ message: 'Demo data reset successfully with active clinic simulation!', analytics: db.getAnalytics() });
+});
 
-  if (req.app.get('io')) {
-    req.app.get('io').emit('DATA_RESET');
-    req.app.get('io').emit('QUEUE_UPDATED', {});
-  }
-
-  res.json({ message: 'Demo data reset successfully with active clinic simulation!', analytics });
-};
-
-export const getPostgresSchema = (req, res) => {
-  const schema = db.exportPostgreSQLSchema();
+export const getPostgresSchema = handler((req, res) => {
   res.setHeader('Content-Type', 'text/plain');
-  res.send(schema);
-};
+  res.send(db.exportPostgreSQLSchema());
+});

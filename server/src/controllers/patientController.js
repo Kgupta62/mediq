@@ -1,58 +1,29 @@
 import { db } from '../config/db.js';
+import { handler, badRequest, notFound } from '../utils/errors.js';
+import { requireId } from '../utils/validate.js';
 
-export const getPatientHistory = (req, res) => {
-  const { phone } = req.params;
-  if (!phone) {
-    return res.status(400).json({ error: 'Phone number is required' });
-  }
+export const getPatientHistory = handler((req, res) => {
+  const phone = (req.params.phone || '').trim();
+  if (phone.replace(/\D/g, '').length < 4) throw badRequest('Enter at least 4 digits of the phone number');
+  res.json({ phone, ...db.getPatientHistory(phone) });
+});
 
-  const history = db.getPatientHistory(phone);
-  res.json({
-    phone,
-    ...history
-  });
-};
-
-export const getPrescriptionByToken = (req, res) => {
-  const { identifier } = req.params;
-  const token = db.getQueueTokenById(identifier);
-  if (!token) {
-    return res.status(404).json({ error: 'Queue token not found' });
-  }
+export const getPrescriptionByToken = handler((req, res) => {
+  const token = db.getQueueTokenById(requireId(req.params.identifier, 'Token'));
+  if (!token) throw notFound('Queue token not found');
 
   const consultation = db.getConsultationByToken(token.id);
   const doctor = db.getDoctorById(token.doctorId);
-  const clinic = db.getClinic();
-
   if (!consultation) {
-    return res.status(404).json({
-      error: 'No medical prescription recorded yet for this consultation',
-      token,
-      doctor
-    });
+    return res.status(404).json({ error: 'No medical prescription recorded yet for this consultation', token, doctor });
   }
 
-  res.json({
-    token,
-    consultation,
-    doctor,
-    clinic
-  });
-};
+  res.json({ token, consultation, doctor, clinic: db.getClinic() });
+});
 
-export const getPrescriptionById = (req, res) => {
-  const { id } = req.params;
-  const consultation = db.getConsultationById(id);
-  if (!consultation) {
-    return res.status(404).json({ error: 'Prescription not found' });
-  }
+export const getPrescriptionById = handler((req, res) => {
+  const consultation = db.getConsultationById(requireId(req.params.id, 'Prescription ID'));
+  if (!consultation) throw notFound('Prescription not found');
 
-  const doctor = db.getDoctorById(consultation.doctorId);
-  const clinic = db.getClinic();
-
-  res.json({
-    consultation,
-    doctor,
-    clinic
-  });
-};
+  res.json({ consultation, doctor: db.getDoctorById(consultation.doctorId), clinic: db.getClinic() });
+});

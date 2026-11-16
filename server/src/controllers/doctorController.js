@@ -1,39 +1,35 @@
 import { db } from '../config/db.js';
+import { handler, queueUpdated, notFound } from '../utils/errors.js';
+import { requireId } from '../utils/validate.js';
+import { queueStats } from '../utils/queue.js';
 
-export const getDoctors = (req, res) => {
-  const doctors = db.getDoctors();
+const loadDoctor = (id) => {
+  const doc = db.getDoctorById(requireId(id, 'Doctor ID'));
+  if (!doc) throw notFound('Doctor not found');
+  return doc;
+};
+
+export const getDoctors = handler((req, res) => {
   const tokens = db.getQueueTokens();
-
-  // Enrich with live queue counts
-  const enriched = doctors.map(doc => {
-    const docTokens = tokens.filter(t => t.doctorId === doc.id);
-    const waiting = docTokens.filter(t => t.status === 'waiting');
-    const current = docTokens.find(t => t.status === 'serving' || t.status === 'called');
-
+  const doctors = db.getDoctors().map(doc => {
+    const { waiting, serving, estimatedWait } = queueStats(tokens.filter(t => t.doctorId === doc.id));
     return {
       ...doc,
       waitingCount: waiting.length,
-      currentServingToken: current ? current.displayToken : 'None',
-      estimatedWaitTime: waiting.length * 12 // estimated 12 mins per patient
+      currentServingToken: serving ? serving.displayToken : 'None',
+      estimatedWaitTime: estimatedWait
     };
   });
+  res.json({ doctors });
+});
 
-  res.json({ doctors: enriched });
-};
+export const getDoctorById = handler((req, res) => {
+  res.json({ doctor: loadDoctor(req.params.id) });
+});
 
-export const getDoctorById = (req, res) => {
-  const doc = db.getDoctorById(req.params.id);
-  if (!doc) return res.status(404).json({ error: 'Doctor not found' });
-  res.json({ doctor: doc });
-};
-
-export const toggleDoctorAvailability = (req, res) => {
-  const doc = db.getDoctorById(req.params.id);
-  if (!doc) return res.status(404).json({ error: 'Doctor not found' });
-
-  const updated = db.updateDoctor(req.params.id, {
-    isAvailable: !doc.isAvailable
-  });
-
+export const toggleDoctorAvailability = handler((req, res) => {
+  const doc = loadDoctor(req.params.id);
+  const updated = db.updateDoctor(doc.id, { isAvailable: !doc.isAvailable });
+  queueUpdated(req, 'doctor_toggled', doc.id);
   res.json({ doctor: updated, message: `Doctor is now ${updated.isAvailable ? 'Available' : 'Away'}` });
-};
+});

@@ -12,16 +12,352 @@ import {
   Clock,
   User,
   FileText,
-  Pill,
-  HeartPulse,
-  Calendar,
   AlertTriangle,
   RefreshCw,
   Flame,
-  Check,
   History,
-  Printer
+  PhoneCall,
+  Loader2,
+  X
 } from 'lucide-react';
+
+const EMPTY_NOTES = {
+  diagnosis: '',
+  prescription: '',
+  bp: '120/80',
+  pulse: '74',
+  temp: '98.6',
+  notes: '',
+  followUpDate: ''
+};
+
+const BTN = {
+  primary: 'btn-primary',
+  success: 'btn-success',
+  secondary: 'btn-secondary',
+  danger: 'btn-danger',
+  dangerSoft: 'btn-danger-soft',
+  ghost: 'btn-ghost btn-sm',
+  chip: 'btn-secondary btn-sm'
+};
+
+const ErrorBanner = ({ message, onDismiss, onRetry }) => {
+  if (!message) return null;
+  return (
+    <div role="alert" className="flex flex-wrap items-center gap-2.5 px-3.5 py-2.5 rounded-control bg-red-tint text-subheadline text-red">
+      <AlertTriangle size={16} className="shrink-0" aria-hidden="true" />
+      <span className="flex-1 min-w-0 py-1">{message}</span>
+      {onRetry && (
+        <button type="button" onClick={onRetry} className="btn-danger-soft btn-sm">
+          <RefreshCw size={14} aria-hidden="true" /> Try again
+        </button>
+      )}
+      <button type="button" onClick={onDismiss} aria-label="Dismiss error" className="btn-ghost btn-icon text-red -my-2 -mr-2">
+        <X size={16} />
+      </button>
+    </div>
+  );
+};
+
+const Field = ({ label, children }) => (
+  <label className="block">
+    <span className="input-label">{label}</span>
+    {children}
+  </label>
+);
+
+const DoctorSwitcher = ({ doctors, selectedId, onSelect }) => {
+  const activeIndex = Math.max(0, doctors.findIndex(d => d.id === selectedId));
+  if (doctors.length === 0) return null;
+  return (
+    <div className="overflow-x-auto scrollbar-none -mx-4 px-4 lg:mx-0 lg:px-0">
+      <div role="tablist" aria-label="Active doctor" className="segmented min-w-max">
+        <span
+          className="segmented-thumb"
+          aria-hidden="true"
+          style={{ width: `calc((100% - 4px) / ${doctors.length})`, left: `calc(2px + (100% - 4px) * ${activeIndex} / ${doctors.length})` }}
+        />
+        {doctors.map(d => {
+          const active = selectedId === d.id;
+          return (
+            <button
+              key={d.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => onSelect(d.id)}
+              className={`segmented-item min-h-[44px] ${active ? 'text-label' : ''}`}
+            >
+              <span>{d.name.split(' ')[1] || d.name}</span>
+              <span className={`text-footnote tabular ${active ? 'text-accent' : 'text-secondary'}`}>{d.roomNumber.replace(/\s*\(.*\)/, '')}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const DetailRow = ({ label, children, tone = 'text-label' }) => (
+  <div className="list-row justify-between">
+    <span className="text-subheadline text-secondary">{label}</span>
+    <span className={`text-subheadline font-medium text-right tabular ${tone}`}>{children}</span>
+  </div>
+);
+
+const ServingCard = ({ token, room, waitingCount, actionLoading, onCallNext, onRecall, onNoShow, onHistory }) => {
+  const [confirmNoShow, setConfirmNoShow] = useState(false);
+
+  useEffect(() => {
+    setConfirmNoShow(false);
+  }, [token?.id]);
+
+  return (
+    <section aria-label="Current consultation" className={`card overflow-hidden ${token ? 'ring-2 ring-accent' : ''}`}>
+      <div className="card-header">
+        <h2 className="text-headline text-label flex items-center gap-2.5">
+          <span className={`icon-tile ${token ? 'icon-tile-green' : 'icon-tile-gray'}`} aria-hidden="true">
+            <Stethoscope size={16} />
+          </span>
+          In consultation
+        </h2>
+        <span className="text-subheadline text-secondary tabular">{room}</span>
+      </div>
+
+      {token ? (
+        <div className="card-body">
+          <div className="flex flex-col md:flex-row md:items-start justify-between gap-5">
+            <div className="min-w-0 flex-1">
+              <span className="section-title">Now serving</span>
+              <div className="token-badge text-[44px] leading-none text-accent mt-1">{token.displayToken}</div>
+              <h3 className="text-title3 text-label mt-3 truncate">{token.patientName}</h3>
+              <button type="button" onClick={onHistory} className={`${BTN.chip} mt-3`}>
+                <History size={14} aria-hidden="true" /> Patient history
+              </button>
+            </div>
+
+            <div className="list-inset md:w-72 shrink-0 bg-surface-secondary">
+              <DetailRow label="Phone">{token.patientPhone}</DetailRow>
+              <DetailRow label="Age">{token.patientAge ? `${token.patientAge} yrs` : 'Not recorded'}</DetailRow>
+              <DetailRow label="Gender">{token.patientGender}</DetailRow>
+              <DetailRow label="Waited" tone="text-orange">{token.waitTimeMinutes || 12} min</DetailRow>
+              <DetailRow label="Reason">{token.reason || 'General checkup'}</DetailRow>
+            </div>
+          </div>
+
+          {confirmNoShow ? (
+            <div role="group" aria-label="Confirm no-show" className="mt-5 p-4 rounded-control bg-red-tint flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <p className="text-subheadline text-label">
+                Mark <strong className="token-badge">{token.displayToken}</strong> ({token.patientName}) as a no-show? The token leaves the queue and can't be called again.
+              </p>
+              <div className="flex items-center gap-2 shrink-0">
+                <button type="button" onClick={() => setConfirmNoShow(false)} className={BTN.secondary}>Keep in queue</button>
+                <button type="button" onClick={() => { setConfirmNoShow(false); onNoShow(); }} className={BTN.danger}>
+                  <XCircle size={15} aria-hidden="true" /> Mark as no-show
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2.5 mt-5">
+              <button type="button" onClick={onRecall} title="Ring the chime and announce the token again" className={BTN.secondary}>
+                <Volume2 size={16} aria-hidden="true" /> Re-ring chime
+              </button>
+              <button type="button" onClick={() => setConfirmNoShow(true)} className={BTN.dangerSoft}>
+                <XCircle size={16} aria-hidden="true" /> No-show
+              </button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="card-body py-10 text-center">
+          <div className="w-14 h-14 rounded-card bg-fill text-secondary flex items-center justify-center mx-auto mb-3">
+            <User size={26} aria-hidden="true" />
+          </div>
+          <h3 className="text-title3 text-label">Room is free</h3>
+          <p className="text-subheadline text-secondary mt-1 max-w-sm mx-auto">
+            Call the next patient. The waiting room TV will chime and announce their token.
+          </p>
+          <button
+            type="button"
+            onClick={() => onCallNext()}
+            disabled={waitingCount === 0 || actionLoading}
+            className="btn-primary btn-lg mt-6"
+          >
+            {actionLoading ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : <PhoneCall size={18} aria-hidden="true" />}
+            {waitingCount === 0 ? 'No patients waiting' : `Call next patient (${waitingCount} waiting)`}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+};
+
+const ConsultationForm = ({ notes, setNotes, onComplete, actionLoading }) => {
+  const set = (key) => (e) => setNotes(prev => ({ ...prev, [key]: e.target.value }));
+  return (
+    <section aria-label="Clinical notes" className="card overflow-hidden">
+      <div className="card-header">
+        <h3 className="text-headline text-label flex items-center gap-2.5">
+          <span className="icon-tile icon-tile-indigo" aria-hidden="true"><FileText size={16} /></span>
+          Notes and prescription
+        </h3>
+      </div>
+
+      <div className="card-body space-y-4">
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Blood pressure">
+            <input type="text" value={notes.bp} onChange={set('bp')} placeholder="120/80" className="input-base tabular" />
+          </Field>
+          <Field label="Pulse (bpm)">
+            <input type="text" inputMode="numeric" value={notes.pulse} onChange={set('pulse')} placeholder="74" className="input-base tabular" />
+          </Field>
+          <Field label="Temp (F)">
+            <input type="text" inputMode="decimal" value={notes.temp} onChange={set('temp')} placeholder="98.6" className="input-base tabular" />
+          </Field>
+        </div>
+
+        <Field label="Clinical diagnosis">
+          <input
+            type="text"
+            value={notes.diagnosis}
+            onChange={set('diagnosis')}
+            placeholder="e.g. Viral upper respiratory tract infection"
+            className="input-base"
+          />
+        </Field>
+
+        <Field label="Medicines and dosage (one per line)">
+          <textarea
+            rows={4}
+            value={notes.prescription}
+            onChange={set('prescription')}
+            placeholder={'1. Tab Paracetamol 650mg - 1 stat, then SOS\n2. Tab Amoxicillin 500mg - 1-0-1 x 5 days'}
+            className="input-base font-mono text-subheadline py-3 resize-y"
+          />
+        </Field>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Advice / lab tests">
+            <input type="text" value={notes.notes} onChange={set('notes')} placeholder="e.g. Fasting lipid profile, CBC" className="input-base" />
+          </Field>
+          <Field label="Follow-up date">
+            <input type="date" value={notes.followUpDate} onChange={set('followUpDate')} className="input-base" />
+          </Field>
+        </div>
+
+        <button type="button" onClick={onComplete} disabled={actionLoading} className="btn-success btn-lg w-full">
+          {actionLoading ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : <CheckCircle2 size={18} aria-hidden="true" />}
+          {actionLoading ? 'Saving...' : 'Complete consultation'}
+        </button>
+      </div>
+    </section>
+  );
+};
+
+const moveListFocus = (e) => {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  const item = e.target.closest('li');
+  if (!item) return;
+  const next = e.key === 'ArrowDown' ? item.nextElementSibling : item.previousElementSibling;
+  const btn = next?.querySelector('button');
+  if (btn) {
+    e.preventDefault();
+    btn.focus();
+  }
+};
+
+const WaitingList = ({ tokens, loading, onRefresh, onCall, actionLoading }) => (
+  <section aria-label="Waiting patients">
+    <div className="flex items-center justify-between mb-2 px-1">
+      <h3 className="section-title flex items-center gap-2">
+        <Clock size={13} aria-hidden="true" /> Waiting
+        <span className="badge-slate tabular">{tokens.length}</span>
+      </h3>
+      <button type="button" onClick={onRefresh} disabled={loading} className={BTN.ghost}>
+        <RefreshCw size={14} className={loading ? 'animate-spin' : ''} aria-hidden="true" /> Refresh
+      </button>
+    </div>
+
+    {loading && tokens.length === 0 ? (
+      <div className="list-inset" aria-hidden="true">
+        {[0, 1, 2].map(i => <div key={i} className="list-row"><div className="h-9 w-full skeleton" /></div>)}
+      </div>
+    ) : tokens.length === 0 ? (
+      <div className="card card-body text-center">
+        <CheckCircle2 size={28} className="mx-auto text-green mb-2" aria-hidden="true" />
+        <p className="text-headline text-label">All caught up</p>
+        <p className="text-footnote text-secondary mt-1">No patients are waiting for this OPD. New tokens appear here as the front desk issues them.</p>
+      </div>
+    ) : (
+      <ol className="list-inset" onKeyDown={moveListFocus} aria-label="Waiting queue, use the up and down arrow keys to move between patients">
+        {tokens.map((tok, idx) => {
+          const isEmergency = tok.priorityLevel === 3;
+          const isSenior = tok.priorityLevel === 2;
+          return (
+            <li key={tok.id} className="list-row justify-between">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-footnote text-tertiary w-4 text-right shrink-0 tabular">{idx + 1}</span>
+                <span className={`token-badge text-callout shrink-0 w-14 ${isEmergency ? 'text-red' : 'text-accent'}`}>
+                  {tok.displayToken}
+                </span>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <h4 className="text-subheadline font-semibold text-label truncate">{tok.patientName}</h4>
+                    {isEmergency && (
+                      <span className="badge-rose">
+                        <Flame size={12} aria-hidden="true" /> Urgent
+                      </span>
+                    )}
+                    {isSenior && <span className="badge-amber">Senior</span>}
+                  </div>
+                  <p className="text-footnote text-secondary truncate">{tok.reason || 'General consultation'}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onCall(tok.id)}
+                disabled={actionLoading}
+                aria-label={`Call ${tok.displayToken}, ${tok.patientName}`}
+                className="btn-primary btn-sm shrink-0"
+              >
+                <PhoneCall size={15} aria-hidden="true" /> Call
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+    )}
+  </section>
+);
+
+const CompletedList = ({ tokens, onViewPrescription }) => (
+  <section aria-label="Completed consultations">
+    <div className="flex items-center justify-between mb-2 px-1">
+      <h4 className="section-title flex items-center gap-2">
+        <CheckCircle2 size={13} aria-hidden="true" /> Completed today
+      </h4>
+      <span className="text-footnote text-secondary tabular">{tokens.length}</span>
+    </div>
+    <div className="list-inset max-h-72 overflow-y-auto">
+      {tokens.length === 0 ? (
+        <p className="list-row justify-center text-subheadline text-secondary py-4">No consultations finished yet today.</p>
+      ) : (
+        tokens.map(tok => (
+          <div key={tok.id} className="list-row justify-between">
+            <div className="flex items-center gap-3 min-w-0">
+              <CheckCircle2 size={16} className="text-green shrink-0" aria-hidden="true" />
+              <span className="token-badge text-subheadline text-secondary shrink-0">{tok.displayToken}</span>
+              <span className="text-subheadline text-label truncate">{tok.patientName}</span>
+            </div>
+            <button type="button" onClick={() => onViewPrescription(tok)} aria-label={`View prescription for ${tok.patientName}`} className="btn-ghost btn-sm shrink-0">
+              <FileText size={14} aria-hidden="true" /> Prescription
+            </button>
+          </div>
+        ))
+      )}
+    </div>
+  </section>
+);
 
 export const DoctorDeskPage = () => {
   const { user } = useAuth();
@@ -33,8 +369,8 @@ export const DoctorDeskPage = () => {
   const [clinic, setClinic] = useState(null);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  // Modals
   const [prescriptionModalOpen, setPrescriptionModalOpen] = useState(false);
   const [selectedPrescription, setSelectedPrescription] = useState(null);
   const [selectedPrescriptionToken, setSelectedPrescriptionToken] = useState(null);
@@ -43,18 +379,7 @@ export const DoctorDeskPage = () => {
   const [historyPhone, setHistoryPhone] = useState('');
   const [historyPatientName, setHistoryPatientName] = useState('');
 
-  // Clinical Notes & Rx State
-  const [clinicalNotes, setClinicalNotes] = useState({
-    diagnosis: '',
-    prescription: '',
-    bp: '120/80',
-    pulse: '74',
-    temp: '98.6',
-    notes: '',
-    followUpDate: ''
-  });
-
-  const [activeTab, setActiveTab] = useState('active'); // 'active', 'history'
+  const [clinicalNotes, setClinicalNotes] = useState(EMPTY_NOTES);
 
   useEffect(() => {
     loadDoctors();
@@ -65,8 +390,8 @@ export const DoctorDeskPage = () => {
     try {
       const data = await api.getClinic();
       setClinic(data.clinic);
-    } catch (err) {
-      console.error('Failed to load clinic:', err);
+    } catch {
+      setClinic(null);
     }
   };
 
@@ -76,7 +401,6 @@ export const DoctorDeskPage = () => {
     }
   }, [selectedDoctorId, queueTick]);
 
-  // If logged in as a specific doctor, auto-select their ID
   useEffect(() => {
     if (user?.role === 'doctor' && user?.doctorId) {
       setSelectedDoctorId(user.doctorId);
@@ -91,7 +415,7 @@ export const DoctorDeskPage = () => {
         setSelectedDoctorId(data.doctors[0].id);
       }
     } catch (err) {
-      console.error('Failed to load doctors:', err);
+      setError(err.message || 'Could not load the doctor list. Refresh the page to try again.');
     }
   };
 
@@ -101,7 +425,7 @@ export const DoctorDeskPage = () => {
       const data = await api.getQueue({ doctorId: docId });
       setQueueTokens(data.tokens || []);
     } catch (err) {
-      console.error('Failed to load queue:', err);
+      setError(err.message || 'Could not load the queue. Check the server connection and refresh.');
     } finally {
       setLoading(false);
     }
@@ -115,19 +439,11 @@ export const DoctorDeskPage = () => {
   const handleCallNext = async (specificTokenId = null) => {
     try {
       setActionLoading(true);
+      setError('');
       await api.callNextToken(selectedDoctorId, specificTokenId);
-      // Reset clinical notes for next patient
-      setClinicalNotes({
-        diagnosis: '',
-        prescription: '',
-        bp: '120/80',
-        pulse: '74',
-        temp: '98.6',
-        notes: '',
-        followUpDate: ''
-      });
+      setClinicalNotes(EMPTY_NOTES);
     } catch (err) {
-      alert(err.message || 'Failed to call next patient');
+      setError(err.message || 'Could not call the next patient. Try again.');
     } finally {
       setActionLoading(false);
     }
@@ -138,7 +454,7 @@ export const DoctorDeskPage = () => {
     try {
       await api.recallToken(servingToken.id);
     } catch (err) {
-      alert(err.message || 'Recall failed');
+      setError(err.message || 'Could not re-ring the chime. Try again.');
     }
   };
 
@@ -146,6 +462,7 @@ export const DoctorDeskPage = () => {
     if (!servingToken) return;
     try {
       setActionLoading(true);
+      setError('');
       const res = await api.completeToken({
         tokenId: servingToken.id,
         diagnosis: clinicalNotes.diagnosis || 'Routine Checkup Completed',
@@ -158,26 +475,14 @@ export const DoctorDeskPage = () => {
         notes: clinicalNotes.notes,
         followUpDate: clinicalNotes.followUpDate
       });
-
-      // Clear notes
-      setClinicalNotes({
-        diagnosis: '',
-        prescription: '',
-        bp: '120/80',
-        pulse: '74',
-        temp: '98.6',
-        notes: '',
-        followUpDate: ''
-      });
-
-      // Automatically open official prescription modal for review / printing
+      setClinicalNotes(EMPTY_NOTES);
       if (res.consultation) {
         setSelectedPrescription(res.consultation);
         setSelectedPrescriptionToken(res.token);
         setPrescriptionModalOpen(true);
       }
     } catch (err) {
-      alert(err.message || 'Failed to complete consultation');
+      setError(err.message || 'Could not save the consultation. Your notes are still here; try again.');
     } finally {
       setActionLoading(false);
     }
@@ -190,7 +495,7 @@ export const DoctorDeskPage = () => {
       setSelectedPrescriptionToken(res.token);
       setPrescriptionModalOpen(true);
     } catch (err) {
-      alert(err.message || 'Prescription not found');
+      setError(err.message || `No prescription found for token ${tok.displayToken}.`);
     }
   };
 
@@ -202,365 +507,72 @@ export const DoctorDeskPage = () => {
 
   const handleMarkNoShow = async () => {
     if (!servingToken) return;
-    if (confirm(`Mark Token ${servingToken.displayToken} (${servingToken.patientName}) as Absent / No-Show?`)) {
-      try {
-        await api.markNoShow(servingToken.id);
-      } catch (err) {
-        alert(err.message || 'Failed to mark no show');
-      }
+    try {
+      await api.markNoShow(servingToken.id);
+    } catch (err) {
+      setError(err.message || 'Could not mark the no-show. Try again.');
     }
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8 animate-fade-in">
-      {/* Header with Doctor Selector */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8 pb-6 border-b border-slate-800">
+    <div className="max-w-6xl w-full min-w-0 mx-auto px-4 sm:px-6 py-6 sm:py-8">
+      <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 mb-6">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              Doctor OPD Consultation Desk
-            </h1>
-            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
-              Clinical Workspace
-            </span>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h1 className="page-title">Consultation desk</h1>
+            <span className="badge-cyan px-2.5 py-1">Doctor</span>
           </div>
-          <p className="text-xs text-slate-400 mt-1">
-            Call patients into your consultation room, ring the waiting room TV chime, and record prescriptions.
+          <p className="page-subtitle">
+            Call patients in, announce on the waiting room TV and record prescriptions.
           </p>
         </div>
+        <DoctorSwitcher doctors={doctors} selectedId={selectedDoctorId} onSelect={setSelectedDoctorId} />
+      </header>
 
-        {/* Doctor OPD Switcher */}
-        <div className="flex items-center gap-2 bg-slate-900 p-1.5 rounded-xl border border-slate-800">
-          <span className="text-xs font-semibold text-slate-400 px-2">Active Doctor:</span>
-          {doctors.map(d => (
-            <button
-              key={d.id}
-              onClick={() => setSelectedDoctorId(d.id)}
-              className={`py-1.5 px-3 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
-                selectedDoctorId === d.id
-                  ? 'bg-cyan-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <span>{d.name.split(' ')[1]}</span>
-              <span className="text-[10px] font-mono opacity-80">({d.roomNumber.split(' ')[0]})</span>
-            </button>
-          ))}
+      {error && (
+        <div className="mb-5">
+          <ErrorBanner
+            message={error}
+            onDismiss={() => setError('')}
+            onRetry={doctors.length === 0 ? () => { loadDoctors(); loadQueue(selectedDoctorId); } : undefined}
+          />
         </div>
-      </div>
+      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left Column: Currently Serving Patient & Consultation Editor (7 cols) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-7 space-y-6">
-          {/* Active Serving Hero Card */}
-          <div className={`glass-panel p-6 sm:p-8 transition-all ${
-            servingToken
-              ? 'border-emerald-500/50 bg-emerald-950/20 shadow-2xl'
-              : 'border-slate-800 bg-slate-900/40'
-          }`}>
-            <div className="flex items-center justify-between pb-4 border-b border-white/10">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-                <Stethoscope size={16} className="text-cyan-400" /> Currently In Consultation
-              </span>
-              <span className="text-xs font-mono text-cyan-400 font-semibold">
-                {currentDoctor?.roomNumber}
-              </span>
-            </div>
-
-            {servingToken ? (
-              <div className="my-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div>
-                    <span className="text-xs uppercase tracking-widest font-mono font-bold text-slate-400">
-                      Token Number
-                    </span>
-                    <div className="text-4xl font-black font-mono text-emerald-400 mt-1">
-                      {servingToken.displayToken}
-                    </div>
-                    <h2 className="text-xl font-bold text-white mt-1">
-                      {servingToken.patientName}
-                    </h2>
-                    <p className="text-xs text-slate-400 font-mono mt-0.5 flex flex-wrap items-center gap-2">
-                      <span>Phone: {servingToken.patientPhone} • {servingToken.patientAge || 'N/A'} yrs • {servingToken.patientGender}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleOpenPatientHistory(servingToken.patientPhone, servingToken.patientName)}
-                        className="py-0.5 px-2 bg-cyan-950/80 hover:bg-cyan-700 text-cyan-400 hover:text-white border border-cyan-800/60 rounded text-[10px] font-bold flex items-center gap-1 transition"
-                      >
-                        <History size={11} /> EHR History
-                      </button>
-                    </p>
-                  </div>
-
-                  {/* Consultation Time / Wait Time */}
-                  <div className="text-left sm:text-right bg-slate-900/80 p-3.5 rounded-xl border border-slate-800">
-                    <span className="text-[11px] text-slate-400 block">Patient Wait Time:</span>
-                    <span className="font-mono font-bold text-amber-400 text-base">
-                      {servingToken.waitTimeMinutes || 12} mins
-                    </span>
-                    <span className="text-[10px] text-slate-500 block mt-1">
-                      Reason: <strong className="text-slate-300">{servingToken.reason || 'General Checkup'}</strong>
-                    </span>
-                  </div>
-                </div>
-
-                {/* Consultation Actions Bar */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 mt-6">
-                  <button
-                    onClick={handleRecall}
-                    title="Ring chime and announce again on Waiting Room TV"
-                    className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-400 text-xs font-bold transition border border-slate-700 flex items-center justify-center gap-1.5"
-                  >
-                    <Volume2 size={15} /> Re-Ring Chime
-                  </button>
-
-                  <button
-                    onClick={handleMarkNoShow}
-                    title="Mark patient as absent"
-                    className="py-2.5 px-3 rounded-xl bg-rose-950/40 hover:bg-rose-900/50 text-rose-400 text-xs font-bold transition border border-rose-800/40 flex items-center justify-center gap-1.5"
-                  >
-                    <XCircle size={15} /> Mark No-Show
-                  </button>
-
-                  <button
-                    onClick={handleCompleteConsultation}
-                    disabled={actionLoading}
-                    className="col-span-2 sm:col-span-1 py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold transition shadow-lg shadow-emerald-950/50 flex items-center justify-center gap-1.5"
-                  >
-                    <CheckCircle2 size={15} /> Complete & Next
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="py-12 text-center">
-                <div className="w-16 h-16 rounded-2xl bg-slate-800 text-slate-500 flex items-center justify-center mx-auto mb-3">
-                  <User size={30} />
-                </div>
-                <h3 className="text-base font-bold text-white">No Patient Currently Inside</h3>
-                <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                  Click the button below to call the next patient in line. The waiting room TV will chime and announce their token.
-                </p>
-
-                <button
-                  onClick={() => handleCallNext()}
-                  disabled={waitingTokens.length === 0 || actionLoading}
-                  className="mt-6 py-3 px-6 rounded-xl bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-bold text-xs transition shadow-lg shadow-cyan-950/60 disabled:opacity-40 inline-flex items-center gap-2"
-                >
-                  <Volume2 size={16} />
-                  <span>Call Next Patient in Queue ({waitingTokens.length} Waiting)</span>
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Clinical Prescription & Diagnosis Form */}
+          <ServingCard
+            token={servingToken}
+            room={currentDoctor?.roomNumber}
+            waitingCount={waitingTokens.length}
+            actionLoading={actionLoading}
+            onCallNext={handleCallNext}
+            onRecall={handleRecall}
+            onNoShow={handleMarkNoShow}
+            onHistory={() => handleOpenPatientHistory(servingToken.patientPhone, servingToken.patientName)}
+          />
           {servingToken && (
-            <div className="glass-panel p-6 sm:p-8 space-y-4 border-slate-800">
-              <h3 className="text-sm font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2 pb-3 border-b border-slate-800">
-                <FileText size={16} className="text-cyan-400" /> Patient Medical Notes & Prescription
-              </h3>
-
-              {/* Patient Vitals */}
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Blood Pressure</label>
-                  <input
-                    type="text"
-                    value={clinicalNotes.bp}
-                    onChange={(e) => setClinicalNotes(prev => ({ ...prev, bp: e.target.value }))}
-                    placeholder="120/80"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Pulse (bpm)</label>
-                  <input
-                    type="text"
-                    value={clinicalNotes.pulse}
-                    onChange={(e) => setClinicalNotes(prev => ({ ...prev, pulse: e.target.value }))}
-                    placeholder="74"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Temp (°F)</label>
-                  <input
-                    type="text"
-                    value={clinicalNotes.temp}
-                    onChange={(e) => setClinicalNotes(prev => ({ ...prev, temp: e.target.value }))}
-                    placeholder="98.6"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono"
-                  />
-                </div>
-              </div>
-
-              {/* Diagnosis */}
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-400 mb-1">Clinical Diagnosis</label>
-                <input
-                  type="text"
-                  value={clinicalNotes.diagnosis}
-                  onChange={(e) => setClinicalNotes(prev => ({ ...prev, diagnosis: e.target.value }))}
-                  placeholder="e.g. Mild Angina, Viral Upper Respiratory Tract Infection, Diabetes Type 2"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
-                />
-              </div>
-
-              {/* Prescription / Medicines */}
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-400 mb-1">Prescribed Medicines & Dosage</label>
-                <textarea
-                  rows={3}
-                  value={clinicalNotes.prescription}
-                  onChange={(e) => setClinicalNotes(prev => ({ ...prev, prescription: e.target.value }))}
-                  placeholder="1. Tab Paracetamol 650mg - 1 stat, then SOS&#10;2. Tab Amoxicillin 500mg - 1-0-1 x 5 days"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-mono"
-                />
-              </div>
-
-              {/* Notes & Follow-up */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Special Advice / Lab Tests</label>
-                  <input
-                    type="text"
-                    value={clinicalNotes.notes}
-                    onChange={(e) => setClinicalNotes(prev => ({ ...prev, notes: e.target.value }))}
-                    placeholder="e.g. Fasting Lipid Profile, Complete Blood Count"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Follow-up Review Date</label>
-                  <input
-                    type="date"
-                    value={clinicalNotes.followUpDate}
-                    onChange={(e) => setClinicalNotes(prev => ({ ...prev, followUpDate: e.target.value }))}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-white"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={handleCompleteConsultation}
-                  className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition shadow-lg shadow-emerald-950/50 flex items-center justify-center gap-2"
-                >
-                  <CheckCircle2 size={16} /> Save Prescription & Complete Consultation
-                </button>
-              </div>
-            </div>
+            <ConsultationForm
+              notes={clinicalNotes}
+              setNotes={setClinicalNotes}
+              onComplete={handleCompleteConsultation}
+              actionLoading={actionLoading}
+            />
           )}
         </div>
 
-        {/* Right Column: Doctor's Queue List & History (5 cols) */}
-        <div className="lg:col-span-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-              <Clock size={16} className="text-cyan-400" /> Waiting in Line ({waitingTokens.length})
-            </h3>
-            <button
-              onClick={() => loadQueue(selectedDoctorId)}
-              className="text-xs text-slate-400 hover:text-white flex items-center gap-1 transition"
-            >
-              <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Refresh
-            </button>
-          </div>
-
-          <div className="space-y-2.5">
-            {waitingTokens.length === 0 ? (
-              <div className="glass-panel p-6 text-center text-slate-500 text-xs italic">
-                All caught up! No waiting patients in this doctor's OPD.
-              </div>
-            ) : (
-              waitingTokens.map((tok, idx) => {
-                const isEmergency = tok.priorityLevel === 3;
-                const isSenior = tok.priorityLevel === 2;
-
-                return (
-                  <div
-                    key={tok.id}
-                    className={`glass-card p-4 flex items-center justify-between gap-3 border ${
-                      isEmergency
-                        ? 'border-rose-500/40 bg-rose-950/20'
-                        : isSenior
-                        ? 'border-amber-500/40 bg-amber-950/20'
-                        : 'border-slate-800'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="font-mono font-black text-sm text-cyan-400 bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800">
-                        {tok.displayToken}
-                      </div>
-
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <h4 className="font-bold text-xs text-white">{tok.patientName}</h4>
-                          {isEmergency && (
-                            <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center gap-0.5">
-                              <Flame size={10} /> URGENT
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-slate-400 truncate max-w-[170px]">
-                          {tok.reason || 'General Consultation'}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleCallNext(tok.id)}
-                        title="Call this specific patient into room"
-                        className="py-1.5 px-3 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs transition shadow-md shadow-cyan-900/40"
-                      >
-                        Call
-                      </button>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          {/* Completed Consultations Summary */}
-          <div className="glass-panel p-5 mt-6 border-slate-800">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center justify-between">
-              <span>Completed Today</span>
-              <span className="font-mono text-emerald-400 font-bold">{completedTokens.length} Patients</span>
-            </h4>
-
-            <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-              {completedTokens.length === 0 ? (
-                <p className="text-xs text-slate-500 italic">No consultations finished today yet.</p>
-              ) : (
-                completedTokens.map(tok => (
-                  <div key={tok.id} className="text-xs p-2.5 rounded-lg bg-slate-900/60 border border-slate-800 flex items-center justify-between gap-2">
-                    <div>
-                      <span className="font-mono font-bold text-slate-300 mr-2">{tok.displayToken}</span>
-                      <span className="text-slate-200 font-medium">{tok.patientName}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleViewPrescriptionForToken(tok)}
-                        className="py-1 px-2 bg-cyan-950/80 hover:bg-cyan-700 text-cyan-400 hover:text-white rounded border border-cyan-800/60 text-[10px] font-bold flex items-center gap-1 transition"
-                      >
-                        <FileText size={10} /> Rx Slip
-                      </button>
-                      <span className="text-[10px] font-mono text-emerald-400">
-                        ✓ Done
-                      </span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
+        <div className="lg:col-span-5 space-y-6">
+          <WaitingList
+            tokens={waitingTokens}
+            loading={loading}
+            onRefresh={() => loadQueue(selectedDoctorId)}
+            onCall={handleCallNext}
+            actionLoading={actionLoading}
+          />
+          <CompletedList tokens={completedTokens} onViewPrescription={handleViewPrescriptionForToken} />
         </div>
       </div>
 
-      {/* Digital Medical Prescription Modal */}
       <MedicalPrescriptionModal
         isOpen={prescriptionModalOpen}
         onClose={() => setPrescriptionModalOpen(false)}
@@ -570,7 +582,6 @@ export const DoctorDeskPage = () => {
         token={selectedPrescriptionToken}
       />
 
-      {/* Patient Past EHR History Modal */}
       <PatientHistoryModal
         isOpen={historyModalOpen}
         onClose={() => setHistoryModalOpen(false)}

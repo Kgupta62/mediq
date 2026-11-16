@@ -1,233 +1,150 @@
-# 🏥 MediQ - Hospital Appointment & Real-Time OPD Queue Management System
-> **Major Academic Project • Real-Time Healthcare Telemetry & OPD Orchestration**
+# MediQ
 
-[![GitHub Repository](https://img.shields.io/badge/GitHub-Major__Project-blue.svg?logo=github)](https://github.com/harshbagwan/Major_Project)
-[![Database](https://img.shields.io/badge/Database-SQLite3_(WAL_Mode)-orange.svg?logo=sqlite)](https://www.sqlite.org/)
-[![Backend](https://img.shields.io/badge/Backend-Node.js_%2B_Express_%2B_Socket.io-green.svg?logo=node.js)](https://nodejs.org/)
-[![Frontend](https://img.shields.io/badge/Frontend-React_18_%2B_Vite_%2B_TailwindCSS-cyan.svg?logo=react)](https://react.dev/)
-[![Deployment](https://img.shields.io/badge/Deployment-Render_%2B_Vercel-purple.svg?logo=render)](./DEPLOYMENT_GUIDE.md)
+Hospital appointment booking and real-time OPD queue management. Patients book or walk in and get a token, the receptionist manages the queue, the doctor calls patients from a desk view, and a waiting room TV screen shows "now serving" with a chime. All screens stay in sync over Socket.io.
 
-**MediQ** is a full-stack, real-time healthcare appointment and OPD queue management platform engineered for standalone clinics, multi-doctor polyclinics, and hospital outpatient departments. It eliminates waiting room congestion by synchronizing patient mobile devices, reception triage desks, doctor consultation rooms, and large-format waiting room TV displays in real time over WebSockets.
+Built as an academic project. Stack: Node + Express + Socket.io + SQLite (better-sqlite3) on the server, React 18 + Vite + Tailwind on the client.
 
----
+## Screenshots
 
-## 📑 Table of Contents
-1. [The Problem & The MediQ Solution](#-the-problem--the-mediq-solution)
-2. [Key System Features](#-key-system-features)
-3. [System Architecture & Dataflow](#-system-architecture--dataflow)
-4. [Database Architecture (SQLite3 WAL Mode)](#-database-architecture-sqlite3-wal-mode)
-5. [Quick Start (Local Setup)](#-quick-start-local-setup)
-6. [Demo Accounts & Role Switcher](#-demo-accounts--role-switcher)
-7. [Step-by-Step Live Multi-Screen Demo](#-step-by-step-live-multi-screen-demo)
-8. [College Project Presentation & Viva Guide](#-college-project-presentation--viva-guide)
-9. [Cloud Deployment (Render & Vercel)](#-cloud-deployment-render--vercel)
+_Coming soon: booking flow, receptionist dashboard, doctor desk, waiting room TV._
 
----
+## Quick start
 
-## 🩺 The Problem & The MediQ Solution
+Requires Node 20 or newer.
 
-### The Problem in Traditional Clinics
-* **Excessive Waiting:** Patients spend an average of **45 to 65 minutes** in crowded waiting rooms.
-* **Queue Opacity:** Patients have zero visibility into how many patients are ahead or when the doctor will call them.
-* **Friction with Walk-ins vs. Appointments:** Receptionists struggle to balance pre-booked appointments with urgent walk-ins using manual pen-and-paper registers.
-* **App Download Barrier:** Hospital mobile apps require 50MB+ downloads, account creation, and password setups that casual or elderly patients rarely install.
+```bash
+git clone <repo-url> mediq
+cd mediq
 
-### The MediQ Solution
-1. **Zero-Friction Mobile Web:** Patients book online or walk in, receive SMS/WhatsApp tracking links, and monitor their live queue position on their phone with **no app download required**.
-2. **Sub-Second WebSocket Synchronization:** When a doctor clicks *"Call Next Patient"*, the waiting room TV chimes and announces the token, the patient's phone updates its countdown, and the receptionist desk updates simultaneously.
-3. **Smart Emergency & Senior Citizen Triage:** Receptionists can bump high-priority or elderly patients to the top of the queue with one click.
-4. **Digital Medical Prescriptions & EHR History:** Doctors enter vitals, diagnosis, and Rx medications, automatically generating a downloadable/printable medical prescription slip and permanent patient EHR record.
-5. **Quantified Impact:** Achieves a **73% reduction in patient waiting room times** (from 52 mins down to ~12–14 mins) and a **74% reduction in waiting room overcrowding**.
+# backend
+cd server && npm install && npm start
+# http://localhost:5000
 
----
-
-## 🌟 Key System Features
-
-### 1. 📱 Patient Booking & Live Queue Tracker
-* **Interactive Doctor & Slot Selection:** Choose specialist doctors, consultation dates, and morning/evening time slots with instant fee and wait-time visibility.
-* **Fast OTP Verification:** 4-digit mobile verification (`1234`) ensuring valid contact numbers.
-* **Live "You are in Line" Mobile Tracker:**
-  * Currently serving token in the clinic.
-  * Your token number & patients ahead of you.
-  * Dynamic estimated wait time countdown.
-  * **Proximity Alert:** Pulsing visual alert when 1–2 tokens away from consultation.
-  * Search by **Token Number** OR **Mobile Phone Number**.
-  * **Digital Medical Prescription Download:** 1-click view and print once consultation is completed.
-
-### 2. 📺 Waiting Room TV Signage Mode
-* **High-Contrast Digital Signage:** Designed for waiting room monitors, projectors, and large TV displays.
-* **Dynamic "Now Serving" Board:** Displays active token numbers, patient names, doctor names, and OPD room numbers.
-* **Web Audio Hospital Chime Synthesizer:** Dual-tone chime (587Hz + 880Hz) and browser speech synthesis announcement (*"Token T-104, please proceed to Room 101, Dr. Rajesh Sharma"*).
-* **Upcoming Queue Ticker & Emergency Notice Marquee.**
-
-### 3. 👩‍💼 Front-Desk & Receptionist Dashboard
-* **5-Second Walk-In Token Issuance:** Fast entry for walk-in patients with instant token slip generation.
-* **Emergency & Senior Citizen Triage:** High-priority toggles that re-order tokens dynamically without disrupting existing appointments.
-* **1-Click Appointment Check-In:** Converts pre-booked appointments into active queue tokens upon arrival.
-* **Appointment Reschedule & Cancellation:** Reschedule appointment date and time slot with real-time Socket.io broadcast.
-* **Thermal Slip Printer:** Printable receipt with barcode, clinic details, and live tracking link.
-* **Patient EHR Lookup:** Search patient history and previous visits by phone number.
-
-### 4. 👨‍⚕️ Doctor OPD Consultation Desk
-* **Queue Controls:** "Call Next Patient" (rings TV chime and notifies patient), "Re-Ring Chime", and "Mark No-Show".
-* **Clinical EHR & Prescription Writer:** Records vitals (Blood Pressure, Pulse, Temperature), diagnosis, medications, advice, and follow-up review dates.
-* **1-Click Digital Prescription (PDF / Print):** Formatted prescription with clinic letterhead, doctor signature block, and ℞ medications table.
-* **Patient EHR Visit History:** 1-click button to view the consulting patient's previous visits, diagnoses, and past prescriptions.
-* **Completed Patients Roster:** Review completed consultations and re-print prescription slips anytime.
-
-### 5. 📊 Real-Time Analytics & Viva Pilot Report
-* **Live KPIs:** Total Patients Seen, Walk-ins vs. Bookings, Average Wait Time, and Doctor Load Distribution.
-* **Before vs. After Pilot Impact Metrics:**
-  * Traditional Waiting Room Wait: **52 minutes**
-  * With MediQ Smart Queue: **~12–14 minutes**
-  * **73% Reduction in Patient Wait Times**
-  * **74% Reduction in Waiting Room Overcrowding**
-  * **4.8 / 5.0 Patient Satisfaction Score**
-* **Exportable Data:** Download pilot report as CSV for project documentation.
-* **PostgreSQL DDL Schema Generator:** Full production-grade ANSI SQL DDL schema ready for cloud deployment.
-
----
-
-## 🏗️ System Architecture & Dataflow
-
-```text
- ┌────────────────────────────────────────────────────────────────────────┐
- │                              Clients Layer                             │
- │  - Patient Mobile Web (Booking & Live Tracker)                         │
- │  - Waiting Room TV Display (Fullscreen Signage + Audio Chime)          │
- │  - Reception Desk (Walk-ins, Triage, Reschedule & Check-ins)           │
- │  - Doctor OPD Desk (Call Next, Clinical EHR, Digital Rx Print)         │
- │  - Analytics Dashboard & Viva Pilot Report                             │
- └───────────────────────────────────▲────────────────────────────────────┘
-                                     │
-                     WebSocket (Socket.io) + REST API
-                                     │
- ┌───────────────────────────────────▼────────────────────────────────────┐
- │                Backend Core Engine (Node.js + Express)                 │
- │  - Socket.io Real-Time Event Hub (Sub-second broadcast)                │
- │  - Appointment & Queue Scheduling State Machine                        │
- │  - Notification Dispatcher (SMS & WhatsApp Simulation)                 │
- │  - JWT Auth & Role-Based Access Control                                │
- └───────────────────────────────────▲────────────────────────────────────┘
-                                     │
- ┌───────────────────────────────────▼────────────────────────────────────┐
- │             Data Layer: SQLite3 (better-sqlite3 WAL Mode)              │
- │  - clinincs, doctors, users, appointments, queue_tokens                │
- │  - consultations, notifications                                        │
- │  - Composite Indexes: (doctorId, status), (patientPhone)               │
- └────────────────────────────────────────────────────────────────────────┘
+# frontend (second terminal)
+cd client && npm install && npm run dev
+# http://localhost:5173
 ```
 
----
+Or run both at once from the repo root: `./start-system.sh` (macOS/Linux) or `start-system.bat` (Windows).
 
-## 🗄️ Database Architecture (SQLite3 WAL Mode)
+With Docker:
 
-The backend uses **`better-sqlite3`** with Write-Ahead Logging (`PRAGMA journal_mode = WAL`) and foreign key constraints enabled for high-performance concurrent read/write operations.
-
-```sql
--- Core Relational Tables
-clinics        (id, name, tagline, address, phone, email, openTime, closeTime, activeNotice)
-doctors        (id, name, title, specialization, experience, roomNumber, fee, bio, isAvailable, currentServingTokenId, todayQueueCount)
-users          (id, name, email, password, role, doctorId, avatar)
-appointments   (id, appointmentNumber, patientName, patientPhone, patientAge, doctorId, appointmentDate, slotTime, reason, status, tokenNumber, displayToken)
-queue_tokens   (id, tokenNumber, displayToken, tokenType, patientName, patientPhone, doctorId, roomNumber, status, priorityLevel, checkInTime, calledTime, completedTime, waitTimeMinutes)
-consultations  (id, tokenId, doctorId, patientName, patientPhone, patientAge, diagnosis, prescription, vitals, notes, followUpDate, created_at)
-notifications  (id, recipientPhone, channel, messageType, content, status, timestamp)
+```bash
+docker compose up --build
+# frontend http://localhost:8080, backend http://localhost:5000
 ```
 
----
+The SQLite database is created automatically at `server/data/mediq.sqlite` and seeded with a clinic, three doctors and demo accounts on first start. Delete the file to reset.
 
-## 🚀 Quick Start (Local Setup)
+## Environment variables
 
-### Method 1: One-Click Windows Launch (Recommended)
-Double-click [`start-system.bat`](file:///D:/WEB%20D/Major%20Project/start-system.bat) in the root folder. It starts both the backend server and frontend client in separate terminal windows.
+Server (`server/.env`, all optional for local dev):
 
----
+| Variable | Default | Notes |
+|---|---|---|
+| `PORT` | `5000` | HTTP and Socket.io port |
+| `CLIENT_URL` | `http://localhost:5173` | Allowed CORS origin(s), comma separated. Localhost is always allowed outside production |
+| `JWT_SECRET` | dev fallback | Required when `NODE_ENV=production` |
+| `JWT_EXPIRES_IN` | `8h` | Token lifetime |
+| `DEMO_OTP` | `1234` | OTP accepted for patient phone verification |
+| `NODE_ENV` | | Set to `production` for deploys |
 
-### Method 2: Manual Terminal Launch
+Client (`client/.env`):
 
-#### Step 1: Start the Backend Server
-```powershell
-cd "D:\WEB D\Major Project\server"
-node src/server.js
+| Variable | Default | Notes |
+|---|---|---|
+| `VITE_API_URL` | `http://localhost:5000` | Backend base URL, no trailing slash |
+
+## Demo accounts
+
+Seeded on first run (`server/src/config/db.js`).
+
+| Role | Email | Password |
+|---|---|---|
+| Receptionist | `receptionist@clinic.com` | `password123` |
+| Doctor (Room 101) | `doctor.sharma@clinic.com` | `password123` |
+| Doctor (Room 102) | `doctor.patel@clinic.com` | `password123` |
+| Doctor (Room 103) | `doctor.ananya@clinic.com` | `password123` |
+
+Patients do not log in. Booking asks for a phone OTP; the accepted code is `DEMO_OTP` (default `1234`). No real SMS is sent.
+
+## Architecture
+
 ```
-* Backend runs at `http://localhost:5000` (REST API & Socket.io).
-* Database initialized at `server/data/mediq.sqlite`.
-
-#### Step 2: Start the Frontend Client
-In a second terminal:
-```powershell
-cd "D:\WEB D\Major Project\client"
-npm.cmd run dev
+client (React SPA, tab switching in App.jsx)
+  pages: PatientBooking, PatientQueueTracker, WaitingRoomTV,
+         ReceptionistDashboard, DoctorDesk, AnalyticsReport
+  services/api.js        REST client (VITE_API_URL)
+  context/SocketContext  Socket.io client, chime triggers
+        |  REST /api/*  +  Socket.io events
+server (Express + Socket.io, ESM)
+  routes/apiRoutes.js    all routes
+  controllers/           auth, doctors, appointments, queue, patients, analytics
+  services/notificationService.js  simulated SMS/WhatsApp, emits NOTIFICATION_DISPATCHED
+  config/db.js           better-sqlite3 data layer, WAL mode, seed defaults
+  config/schema.js       tables and indexes
+        |
+server/data/mediq.sqlite
 ```
-* Frontend runs at `http://localhost:5173`.
 
----
+Queue ordering: priority level (3 emergency, 2 senior, 1 normal) then check-in time. Token statuses: `waiting`, `called`, `serving`, `completed`, `no_show`.
 
-## 🧪 Demo Accounts & Role Switcher
+Socket events emitted by the server: `INITIAL_STATE` (on connect), `QUEUE_UPDATED`, `TOKEN_CREATED`, `TOKEN_CALLED`, `TOKEN_RECALLED`, `TOKEN_COMPLETED`, `TOKEN_NO_SHOW`, `APPOINTMENT_BOOKED`, `APPOINTMENT_RESCHEDULED`, `APPOINTMENT_CANCELLED`, `PATIENT_CHECKED_IN`, `CLINIC_UPDATED`, `NOTIFICATION_DISPATCHED`, `DATA_RESET`.
 
-| Role | Account Email | Password | Access / Purpose |
-|---|---|---|---|
-| **Receptionist** | `receptionist@clinic.com` | `password123` | Walk-in tokens, check-ins, reschedule, EHR lookup |
-| **Senior Cardiologist** | `doctor.sharma@clinic.com` | `password123` | Room 101 OPD desk, call patients, digital Rx writer |
-| **General Physician** | `doctor.patel@clinic.com` | `password123` | Room 102 OPD desk, diabetes & general medicine |
-| **Pediatrician** | `doctor.ananya@clinic.com` | `password123` | Room 103 OPD desk, child care consultations |
-| **Patient / Guest** | *No login needed* | *N/A* | Public booking, phone OTP (`1234`), live queue tracking |
+## API
 
-> 💡 **Tip:** Use the **"Quick Demo Switcher"** in the top-right navbar to switch between Receptionist, Doctor, and Patient views with one click!
+Base path `/api`. Source: `server/src/routes/apiRoutes.js`.
 
----
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/auth/login` | Staff login, returns JWT |
+| POST | `/auth/verify-otp` | Patient phone OTP check |
+| GET | `/clinic` | Clinic info |
+| PATCH | `/clinic` | Update clinic info / notice |
+| GET | `/doctors` | List doctors |
+| GET | `/doctors/:id` | Doctor by id |
+| PATCH | `/doctors/:id/toggle` | Toggle availability |
+| GET | `/appointments` | List appointments (filterable) |
+| POST | `/appointments` | Book appointment |
+| POST | `/appointments/:id/check-in` | Convert appointment to queue token |
+| PATCH | `/appointments/:id/reschedule` | Change date / slot |
+| DELETE | `/appointments/:id` | Cancel appointment |
+| GET | `/queue` | List queue tokens |
+| GET | `/queue/summary` | Per-doctor queue summary |
+| POST | `/queue/walk-in` | Issue walk-in token |
+| POST | `/queue/call-next` | Doctor calls next token |
+| POST | `/queue/recall` | Re-announce current token |
+| POST | `/queue/complete` | Complete consultation, save prescription |
+| POST | `/queue/no-show` | Mark token no-show |
+| POST | `/queue/priority` | Change token priority |
+| GET | `/queue/token/:identifier` | Token status by token number or phone |
+| GET | `/patients/:phone/history` | Patient visit history |
+| GET | `/prescriptions/:id` | Prescription by id |
+| GET | `/prescriptions/token/:identifier` | Prescription by token |
+| GET | `/analytics` | Queue and wait-time stats |
+| GET | `/notifications` | Simulated notification log |
+| POST | `/analytics/reset` | Reset all data |
+| GET | `/schema/postgresql` | PostgreSQL DDL export |
 
-## 🎬 Step-by-Step Live Multi-Screen Demo
+`GET /health` (outside `/api`) returns `{ status, timestamp }`.
 
-To demonstrate real-time synchronization to college professors or examiners:
+## Testing
 
-1. **Window 1 (Waiting Room TV)**: Open `http://localhost:5173` and click the **"Waiting Room TV"** tab. Position this window on the left side of your screen (or an external projector/monitor).
-2. **Window 2 (Patient Mobile)**: Open `http://localhost:5173` in a new window (or phone) and click **"Track Live Queue"** (Token `104` or your phone number). Position it in the center.
-3. **Window 3 (Doctor OPD Desk)**: Open `http://localhost:5173` and select the **"Doctor OPD Desk"** tab.
-4. **Trigger the Real-Time Event**:
-   - In Window 3 (Doctor Desk), click **"Call Next Patient in Queue"**.
-   - **Observe:** Window 1 (Waiting Room TV) immediately chimes and speaks: *"Token T-104, please proceed to Room 101, Dr. Rajesh Sharma"*.
-   - **Observe:** Window 2 (Patient Tracker) immediately updates the countdown and displays a proximity alert!
-   - **Observe:** A simulated WhatsApp/SMS notification toast pops up with the direct consultation alert.
-5. **Complete & Print Prescription**:
-   - In Window 3, enter Blood Pressure (`120/80`), Pulse (`74`), Diagnosis (`Essential Hypertension`), and Rx medications.
-   - Click **"Complete & Next"**.
-   - An official **Digital Medical Prescription** modal pops up with 1-click **Print / Save as PDF**.
-   - Window 2 (Patient Phone) displays **"Consultation Completed - View & Download Prescription"**.
+```bash
+cd server && npx vitest run
+cd client && npx vitest run
+```
 
----
+Client build check: `cd client && npm run build`.
 
-## 🎓 College Project Presentation & Viva Guide
+## Deployment
 
-### 1. The 30-Second Elevator Pitch
-> *"MediQ is a real-time hospital Outpatient Department (OPD) queue management system designed to eliminate waiting room chaos. Unlike conventional hospital portals that require patients to download heavy mobile apps and manually refresh web pages, MediQ offers zero-app mobile queue tracking and synchronizes the doctor's desk, receptionist, patient phones, and lobby TV displays in sub-second time using WebSockets and a high-performance SQLite3 engine. Our pilot study demonstrated a 73% reduction in patient waiting times."*
+- Backend: Render (`server/render.yaml`) or Railway (`server/railway.json`). Set `JWT_SECRET` and `CLIENT_URL` to the frontend origin. SQLite lives on local disk, so use a persistent disk or accept data loss on redeploy.
+- Frontend: Vercel (`client/vercel.json`) or Netlify (`client/public/_redirects`). Set `VITE_API_URL` to the backend URL.
+- Docker: `docker-compose.yml` runs both with a named volume for the database.
 
-### 2. Key Architecture Points to Highlight
-* **WebSocket vs. HTTP Polling:** Explain why HTTP polling would overload the server with hundreds of patients refreshing every 5 seconds. Socket.io uses persistent bi-directional TCP connections to push events only when state changes.
-* **SQLite3 with WAL Mode:** Explain that Write-Ahead Logging allows simultaneous non-blocking reads while writing queue tokens and consultations.
-* **Deterministic Priority Queue:** Queue sorting algorithm prioritizes Emergency (Level 3) > Senior Citizens (Level 2) > Normal Appointments/Walk-ins (Level 1), and uses FIFO within the same priority level.
-* **Data Privacy & Ephemeral Tokens:** Patient contacts are protected using OTP verification and token IDs without requiring permanent account registration.
+See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for steps and [PROJECT_DOCUMENTATION.md](./PROJECT_DOCUMENTATION.md) for internals.
 
-### 3. Top Examiner Questions & Answers
-* **Q: Why SQLite instead of MongoDB or PostgreSQL?**  
-  *A:* SQLite with `better-sqlite3` and WAL mode provides sub-millisecond execution times with zero network overhead, zero external database setup, and ACID compliance. For multi-server cloud scaling, our schema is 100% ANSI SQL compliant and can be ported to PostgreSQL in under 2 minutes.
-* **Q: How does the Waiting Room TV announce token calls without an audio file?**  
-  *A:* It uses the browser's native HTML5 Web Audio API synthesizer to generate a dual-tone frequency chime (587Hz + 880Hz) followed by the SpeechSynthesis API for text-to-speech, requiring zero external MP3 assets or external bandwidth.
-* **Q: How do walk-ins and pre-booked appointments coexist without conflict?**  
-  *A:* Pre-booked appointments have reserved time slots. When a patient arrives at the clinic, the receptionist performs a 1-click check-in that converts the appointment into an active queue token with an appointment flag (`A-101`), which is slotted ahead of routine walk-ins (`T-102`) for that time window.
+## License
 
----
-
-## ☁️ Cloud Deployment (Render & Vercel)
-
-* **Backend on Render:** Configured via `server/render.yaml` with Node.js runtime and environment variables (`PORT=10000`, `NODE_ENV=production`).
-* **Frontend on Vercel:** Deploy `client/` folder as a Single Page Application (SPA) with automatic Vite build.
-* Detailed step-by-step instructions are available in [`DEPLOYMENT_GUIDE.md`](./DEPLOYMENT_GUIDE.md).
-
----
-
-## 👨‍💻 Author
-**Harsh Bagwan**  
-*Department of Computer Science & Engineering*  
-Major Academic Project 2026
+MIT, see [LICENSE](./LICENSE).

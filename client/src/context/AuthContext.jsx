@@ -1,57 +1,89 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { api } from '../services/api';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { api, AUTH_TOKEN_KEY, AUTH_USER_KEY, UNAUTHORIZED_EVENT } from '../services/api';
 
 const AuthContext = createContext(null);
 
+function tokenExpiry(token) {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearStorage() {
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  localStorage.removeItem(AUTH_USER_KEY);
+}
+
+function loadSession() {
+  try {
+    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+    const user = JSON.parse(localStorage.getItem(AUTH_USER_KEY) || 'null');
+    const expiresAt = token ? tokenExpiry(token) : null;
+    if (token && user && (!expiresAt || expiresAt > Date.now())) return { token, user };
+  } catch {
+    /* corrupt storage, fall through */
+  }
+  clearStorage();
+  return { token: null, user: null };
+}
+
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(() => {
-    const saved = localStorage.getItem('mediq_user');
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [session, setSession] = useState(loadSession);
+  const { user, token } = session;
 
-  const [token, setToken] = useState(() => localStorage.getItem('mediq_auth_token'));
+  const logout = useCallback(() => {
+    clearStorage();
+    setSession({ token: null, user: null });
+  }, []);
 
-  const loginWithCredentials = async (email, password) => {
+  useEffect(() => {
+    window.addEventListener(UNAUTHORIZED_EVENT, logout);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, logout);
+  }, [logout]);
+
+  useEffect(() => {
+    if (!token) return undefined;
+    const expiresAt = tokenExpiry(token);
+    if (!expiresAt) return undefined;
+    const timer = setTimeout(logout, Math.min(expiresAt - Date.now(), 2 ** 31 - 1));
+    return () => clearTimeout(timer);
+  }, [token, logout]);
+
+  const loginWithCredentials = useCallback(async (email, password) => {
     const data = await api.login({ email, password });
-    setUser(data.user);
-    setToken(data.token);
-    localStorage.setItem('mediq_auth_token', data.token);
-    localStorage.setItem('mediq_user', JSON.stringify(data.user));
+    localStorage.setItem(AUTH_TOKEN_KEY, data.token);
+    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(data.user));
+    setSession({ token: data.token, user: data.user });
     return data.user;
-  };
+  }, []);
 
-  const loginAsReceptionist = () => {
-    return loginWithCredentials('receptionist@clinic.com', 'password123');
-  };
+  const loginAsReceptionist = useCallback(
+    () => loginWithCredentials('receptionist@clinic.com', 'password123'),
+    [loginWithCredentials]
+  );
 
-  const loginAsDoctor = (doctorId = 'doc-1') => {
+  const loginAsDoctor = useCallback((doctorId = 'doc-1') => {
     const email = doctorId === 'doc-2' ? 'doctor.patel@clinic.com' :
                   doctorId === 'doc-3' ? 'doctor.ananya@clinic.com' : 'doctor.sharma@clinic.com';
     return loginWithCredentials(email, 'password123');
-  };
+  }, [loginWithCredentials]);
 
-  const logout = () => {
-    setUser(null);
-    setToken(null);
-    localStorage.removeItem('mediq_auth_token');
-    localStorage.removeItem('mediq_user');
-  };
+  const value = useMemo(() => ({
+    user,
+    token,
+    loginWithCredentials,
+    loginAsReceptionist,
+    loginAsDoctor,
+    logout,
+    isAuthenticated: !!user,
+    isReceptionist: user?.role === 'receptionist',
+    isDoctor: user?.role === 'doctor'
+  }), [user, token, loginWithCredentials, loginAsReceptionist, loginAsDoctor, logout]);
 
-  return (
-    <AuthContext.Provider value={{
-      user,
-      token,
-      loginWithCredentials,
-      loginAsReceptionist,
-      loginAsDoctor,
-      logout,
-      isAuthenticated: !!user,
-      isReceptionist: user?.role === 'receptionist',
-      isDoctor: user?.role === 'doctor'
-    }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
 export const useAuth = () => useContext(AuthContext);
