@@ -5,7 +5,7 @@ import { Navbar } from './components/Navbar';
 import { NotificationToast } from './components/NotificationToast';
 import { PageLoader } from './components/PageLoader';
 import { api } from './services/api';
-import { ArrowLeft, ShieldCheck, Stethoscope, ClipboardList, WifiOff } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, Stethoscope, ClipboardList, WifiOff, Settings2 } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
 import { useSocket } from './context/SocketContext';
 
@@ -14,6 +14,7 @@ const PatientQueueTracker = lazy(() => import('./pages/PatientQueueTracker').the
 const WaitingRoomTVPage = lazy(() => import('./pages/WaitingRoomTVPage').then((m) => ({ default: m.WaitingRoomTVPage })));
 const ReceptionistDashboard = lazy(() => import('./pages/ReceptionistDashboard').then((m) => ({ default: m.ReceptionistDashboard })));
 const DoctorDeskPage = lazy(() => import('./pages/DoctorDeskPage').then((m) => ({ default: m.DoctorDeskPage })));
+const AdminDashboardPage = lazy(() => import('./pages/AdminDashboardPage').then((m) => ({ default: m.AdminDashboardPage })));
 const AnalyticsReportPage = lazy(() => import('./pages/AnalyticsReportPage').then((m) => ({ default: m.AnalyticsReportPage })));
 
 function ConnectionBanner() {
@@ -28,7 +29,7 @@ function ConnectionBanner() {
 }
 
 function StaffGate({ role, children }) {
-  const { user, loginAsReceptionist, loginAsDoctor } = useAuth();
+  const { user, loginAsReceptionist, loginAsDoctor, loginAsAdmin } = useAuth();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -54,10 +55,15 @@ function StaffGate({ role, children }) {
         </div>
         <h2 className="text-title2 text-label mb-1.5">Staff sign in required</h2>
         <p className="text-subheadline text-secondary mb-6">
-          {role === 'doctor' ? 'The doctor desk' : 'The reception desk'} is for clinic staff. Continue with a demo account.
+          {role === 'doctor' ? 'The doctor desk' : role === 'admin' ? 'The admin dashboard' : 'The reception desk'} is for clinic staff. Continue with a demo account.
         </p>
         <div className="grid gap-2.5">
-          <button className="btn-primary" disabled={busy} onClick={() => signIn(loginAsReceptionist)}>
+          {role === 'admin' && (
+            <button className="btn-primary" disabled={busy} onClick={() => signIn(loginAsAdmin)}>
+              <Settings2 size={18} aria-hidden="true" /> Continue as admin
+            </button>
+          )}
+          <button className={role === 'admin' ? 'btn-secondary' : 'btn-primary'} disabled={busy} onClick={() => signIn(loginAsReceptionist)}>
             <ClipboardList size={18} aria-hidden="true" /> Continue as receptionist
           </button>
           <button className="btn-secondary" disabled={busy} onClick={() => signIn(() => loginAsDoctor('doc-1'))}>
@@ -159,6 +165,12 @@ function MainApp() {
 
         {activeTab === 'analytics' && (
           <AnalyticsReportPage />
+        )}
+
+        {activeTab === 'admin' && (
+          <StaffGate role="admin">
+            <AdminDashboardPage clinic={clinic} onClinicUpdated={setClinic} />
+          </StaffGate>
         )}
         </Suspense>
       </main>

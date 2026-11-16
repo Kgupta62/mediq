@@ -138,7 +138,7 @@ export const AnalyticsReportPage = () => {
     traditionalWaitMinutes: 52,
     systemWaitMinutes: 14,
     waitTimeReductionPercent: 73,
-    patientSatisfactionRating: 4.8
+    patientSatisfactionRating: null
   };
 
   const handleExportCSV = () => {
@@ -273,10 +273,10 @@ export const AnalyticsReportPage = () => {
           tone="icon-tile-indigo"
         />
         <StatCard
-          label="Pilot rating"
-          value={impact.patientSatisfactionRating}
-          unit="/ 5"
-          hint="Patient feedback during pilot"
+          label="Patient rating"
+          value={analytics?.feedback?.count ? analytics.feedback.averageRating : 'No ratings yet'}
+          unit={analytics?.feedback?.count ? '/ 5' : undefined}
+          hint={analytics?.feedback?.count ? `From ${analytics.feedback.count} patient ${analytics.feedback.count === 1 ? 'review' : 'reviews'} today` : 'Patients rate their visit after completion'}
           icon={Award}
           tone="icon-tile-orange"
         />

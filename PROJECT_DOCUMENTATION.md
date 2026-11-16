@@ -31,7 +31,7 @@ server/
 
 `better-sqlite3` with `journal_mode = WAL` and `foreign_keys = ON`. The database file is created on first start in `server/data/`. If `server/data/clinic_data.json` (legacy JSON store) exists and the clinics table is empty, it is imported once.
 
-Tables: `clinics`, `doctors`, `users`, `appointments`, `queue_tokens`, `consultations`, `notifications`.
+Tables: `clinics`, `doctors`, `users`, `appointments`, `queue_tokens`, `consultations`, `notifications`, `feedback`.
 
 Key columns:
 
@@ -40,6 +40,7 @@ Key columns:
 - `queue_tokens.priorityLevel`: `3` emergency, `2` senior, `1` normal
 - `queue_tokens.status`: `waiting | called | serving | completed | no_show`
 - `consultations`: one per completed token, stores diagnosis, prescription, vitals (JSON), followUpDate
+- `feedback`: one row per completed token (`tokenId` is unique), `rating` 1 to 5, optional `comment`, indexed on `tokenId`, `doctorId` and `created_at`
 
 Indexes cover `(doctorId, status)`, `(priorityLevel, checkInTime)`, `patientPhone`, `displayToken` and `tokenNumber` on `queue_tokens`, plus date/doctor, status, phone on `appointments`.
 
@@ -57,7 +58,8 @@ Indexes cover `(doctorId, status)`, `(priorityLevel, checkInTime)`, `patientPhon
 ## Auth
 
 - Staff login: `POST /auth/login` with email and password, returns a JWT (`JWT_SECRET`, expiry `JWT_EXPIRES_IN`). Client stores it and sends `Authorization: Bearer <token>`.
-- `requireAuth` and `requireRole(...roles)` middleware in `server/src/middleware/auth.js`. In production `JWT_SECRET` is mandatory.
+- `requireAuth` and `requireRole(...roles)` middleware in `server/src/middleware/auth.js`. `requireStaff` accepts `receptionist`, `doctor` and `admin`. In production `JWT_SECRET` is mandatory.
+- The admin account (`admin@clinic.com`) unlocks the Admin tab: live overview, clinic settings, doctor management (`POST /doctors`, `PATCH /doctors/:id`), today's token report with CSV export and the feedback summary.
 - Patients never log in. `POST /auth/verify-otp` checks the phone format and compares against `DEMO_OTP`. No SMS provider is wired.
 - CORS: `CLIENT_URL` may be a comma separated list. Localhost origins are always allowed outside production.
 
@@ -77,7 +79,8 @@ The server only emits; clients do not send custom events. On connect the server 
 | `APPOINTMENT_RESCHEDULED` | appointment |
 | `APPOINTMENT_CANCELLED` | appointment |
 | `PATIENT_CHECKED_IN` | `{ appointment, token }` |
-| `CLINIC_UPDATED` | clinic |
+| `CLINIC_UPDATED` | clinic (also after doctor add / edit) |
+| `FEEDBACK_RECEIVED` | `{ feedback, displayToken }` |
 | `NOTIFICATION_DISPATCHED` | notification record |
 | `DATA_RESET` | none |
 
@@ -93,4 +96,4 @@ Client side, `SocketContext` listens to these, refreshes local state, and on `TO
 
 ## Analytics
 
-`GET /api/analytics` aggregates today's tokens: totals by type, average wait and consultation minutes, per-doctor load. `POST /api/analytics/reset` clears transactional tables (used for demos). Any before/after comparison numbers shown in the analytics page are illustrative project targets, not measured results.
+`GET /api/analytics` aggregates today's tokens: totals by type, average wait and consultation minutes, per-doctor load, plus `feedback.averageRating` and `feedback.count` from today's patient ratings (`POST /api/feedback`, public, one per completed token, 409 on duplicate). `POST /api/analytics/reset` clears transactional tables (used for demos). Any before/after comparison numbers shown in the analytics page are illustrative project targets, not measured results.

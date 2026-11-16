@@ -19,7 +19,14 @@ const TOKENS = [
   { patientName: 'Vikram Choudhary', patientPhone: '+91 86558 41907', patientAge: 45, patientGender: 'Male', doctorId: 'doc-1', reason: 'BP spikes & headache', checkIn: 9 },
   { appointment: 5, checkIn: 16, status: 'serving', called: 5 },
   { patientName: 'Amit Saxena', patientPhone: '+91 91675 20483', patientAge: 52, patientGender: 'Male', doctorId: 'doc-2', reason: 'High fasting glucose & blurred vision', checkIn: 7 },
-  { appointment: 4, patientName: 'Kabir Verma (Parent: Nitin)', checkIn: 22, status: 'serving', called: 10 }
+  { appointment: 4, patientName: 'Kabir Verma (Parent: Nitin)', checkIn: 22, status: 'serving', called: 10 },
+  { patientName: 'Lakshmi Nair', patientPhone: '+91 98450 27316', patientAge: 58, patientGender: 'Female', doctorId: 'doc-2', reason: 'Thyroid medication review', checkIn: 95, status: 'completed', called: 80, completed: 68, waitTimeMinutes: 15, serviceTimeMinutes: 12 }
+];
+
+const FEEDBACK = [
+  { rating: 5, comment: 'Very smooth. I waited at the cafe and got a WhatsApp alert when it was my turn.' },
+  { rating: 4, comment: 'Doctor was thorough. The token display made the wait predictable.' },
+  { rating: 5, comment: 'No crowding at the desk, the live tracker is a great idea.' }
 ];
 
 const seed = db.transaction(() => {
@@ -65,6 +72,12 @@ const seed = db.transaction(() => {
       if (status === 'serving') db.updateDoctor(token.doctorId, { currentServingTokenId: token.id });
     }
   }
+
+  const completed = db.getQueueTokens({ status: 'completed', today: true });
+  FEEDBACK.forEach((f, i) => {
+    const token = completed[i];
+    if (token) db.createFeedback({ tokenId: token.id, doctorId: token.doctorId, patientPhone: token.patientPhone, ...f });
+  });
 });
 
 export function seedInitialData({ force = false } = {}) {

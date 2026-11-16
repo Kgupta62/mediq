@@ -6,6 +6,7 @@ import * as aptCtrl from '../controllers/appointmentController.js';
 import * as queueCtrl from '../controllers/queueController.js';
 import * as analyticsCtrl from '../controllers/analyticsController.js';
 import * as patientCtrl from '../controllers/patientController.js';
+import * as feedbackCtrl from '../controllers/feedbackController.js';
 import { requireStaff } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 
@@ -31,7 +32,9 @@ router.patch('/clinic', requireStaff, (req, res) => {
 // Doctors
 router.get('/doctors', docCtrl.getDoctors);
 router.get('/doctors/:id', docCtrl.getDoctorById);
+router.post('/doctors', requireStaff, docCtrl.createDoctor);
 router.patch('/doctors/:id/toggle', requireStaff, docCtrl.toggleDoctorAvailability);
+router.patch('/doctors/:id', requireStaff, docCtrl.updateDoctor);
 
 // Appointments
 router.get('/appointments', aptCtrl.getAppointments);
@@ -55,6 +58,11 @@ router.get('/queue/token/:identifier', queueCtrl.getTokenStatus);
 router.get('/patients/:phone/history', requireStaff, patientCtrl.getPatientHistory);
 router.get('/prescriptions/:id', patientCtrl.getPrescriptionById);
 router.get('/prescriptions/token/:identifier', patientCtrl.getPrescriptionByToken);
+
+// Patient Feedback
+router.post('/feedback', feedbackCtrl.createFeedback);
+router.get('/feedback/summary', requireStaff, feedbackCtrl.getFeedbackSummary);
+router.get('/feedback', requireStaff, feedbackCtrl.listFeedback);
 
 // Analytics & Reports
 router.get('/analytics', analyticsCtrl.getAnalytics);

@@ -71,17 +71,24 @@ export const AuthProvider = ({ children }) => {
     return loginWithCredentials(email, 'password123');
   }, [loginWithCredentials]);
 
+  const loginAsAdmin = useCallback(
+    () => loginWithCredentials('admin@clinic.com', 'password123'),
+    [loginWithCredentials]
+  );
+
   const value = useMemo(() => ({
     user,
     token,
     loginWithCredentials,
     loginAsReceptionist,
     loginAsDoctor,
+    loginAsAdmin,
     logout,
     isAuthenticated: !!user,
     isReceptionist: user?.role === 'receptionist',
-    isDoctor: user?.role === 'doctor'
-  }), [user, token, loginWithCredentials, loginAsReceptionist, loginAsDoctor, logout]);
+    isDoctor: user?.role === 'doctor',
+    isAdmin: user?.role === 'admin'
+  }), [user, token, loginWithCredentials, loginAsReceptionist, loginAsDoctor, loginAsAdmin, logout]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

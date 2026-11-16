@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { useSocket } from '../context/SocketContext';
 import { MedicalPrescriptionModal } from '../components/MedicalPrescriptionModal';
+import { FeedbackCard } from '../components/FeedbackCard';
 import {
   Ticket,
   Clock,
@@ -278,6 +279,10 @@ export const PatientQueueTracker = ({ initialTokenNumber = '104' }) => {
               </div>
             )}
           </div>
+
+          {status === 'completed' && (
+            <FeedbackCard tokenId={tokenData.token.id} displayToken={tokenData.token.displayToken} />
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <Metric

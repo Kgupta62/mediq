@@ -105,6 +105,16 @@ export const SCHEMA_SQL = `
     timestamp TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS feedback (
+    id TEXT PRIMARY KEY,
+    tokenId TEXT NOT NULL UNIQUE REFERENCES queue_tokens(id),
+    doctorId TEXT REFERENCES doctors(id),
+    patientPhone TEXT,
+    rating INTEGER NOT NULL,
+    comment TEXT,
+    created_at TEXT NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_users_email_nocase ON users(email COLLATE NOCASE);
   CREATE INDEX IF NOT EXISTS idx_tokens_doctor_status ON queue_tokens(doctorId, status);
   CREATE INDEX IF NOT EXISTS idx_tokens_status ON queue_tokens(status);
@@ -120,6 +130,9 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_consultations_token ON consultations(tokenId);
   CREATE INDEX IF NOT EXISTS idx_consultations_phone ON consultations(patientPhone);
   CREATE INDEX IF NOT EXISTS idx_notifications_time ON notifications(timestamp);
+  CREATE INDEX IF NOT EXISTS idx_feedback_token ON feedback(tokenId);
+  CREATE INDEX IF NOT EXISTS idx_feedback_doctor ON feedback(doctorId);
+  CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at);
 `;
 
 export const defaultState = {
@@ -214,6 +227,15 @@ export const defaultState = {
       role: 'doctor',
       doctorId: 'doc-3',
       avatar: '👩‍⚕️'
+    },
+    {
+      id: 'usr-5',
+      name: 'Clinic Admin',
+      email: 'admin@clinic.com',
+      password: 'password123',
+      role: 'admin',
+      doctorId: null,
+      avatar: '🛡️'
     }
   ]
 };
@@ -316,7 +338,18 @@ CREATE TABLE IF NOT EXISTS notifications (
     timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS feedback (
+    id VARCHAR(64) PRIMARY KEY,
+    token_id VARCHAR(64) UNIQUE NOT NULL REFERENCES queue_tokens(id) ON DELETE CASCADE,
+    doctor_id VARCHAR(64) REFERENCES doctors(id) ON DELETE SET NULL,
+    patient_phone VARCHAR(32),
+    rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+    comment TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_tokens_doctor_status ON queue_tokens(doctor_id, status);
+CREATE INDEX IF NOT EXISTS idx_feedback_doctor ON feedback(doctor_id);
 CREATE INDEX IF NOT EXISTS idx_appointments_date_doc ON appointments(appointment_date, doctor_id);
 CREATE INDEX IF NOT EXISTS idx_consultations_patient_phone ON consultations(patient_phone);
 `;

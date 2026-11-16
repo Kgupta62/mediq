@@ -2,7 +2,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-const apiMock = vi.hoisted(() => ({ getClinic: vi.fn(), getTokenStatus: vi.fn(), getPrescriptionByToken: vi.fn() }));
+const apiMock = vi.hoisted(() => ({ getClinic: vi.fn(), getTokenStatus: vi.fn(), getPrescriptionByToken: vi.fn(), submitFeedback: vi.fn() }));
 
 vi.mock('../services/api', () => ({ api: apiMock }));
 vi.mock('../context/SocketContext', () => ({ useSocket: () => ({ queueTick: 0 }) }));
@@ -24,6 +24,7 @@ describe('PatientQueueTracker', () => {
   beforeEach(() => {
     apiMock.getClinic.mockResolvedValue({ clinic: { name: 'Test Clinic' } });
     apiMock.getTokenStatus.mockReset();
+    apiMock.submitFeedback.mockReset();
   });
 
   it('shows the loading skeleton, then the token card', async () => {
@@ -72,5 +73,46 @@ describe('PatientQueueTracker', () => {
     fireEvent.change(screen.getByLabelText('Token number or phone number'), { target: { value: ' 107 ' } });
     fireEvent.submit(screen.getByRole('search'));
     await waitFor(() => expect(apiMock.getTokenStatus).toHaveBeenLastCalledWith('107'));
+  });
+
+  it('shows the rate your visit card only once the consultation is completed', async () => {
+    apiMock.getTokenStatus.mockResolvedValueOnce(statusPayload());
+    render(<PatientQueueTracker initialTokenNumber="104" />);
+    await waitFor(() => expect(screen.getByLabelText('Token A-104')).toBeInTheDocument());
+    expect(screen.queryByText('Rate your visit')).toBeNull();
+
+    apiMock.getTokenStatus.mockResolvedValueOnce(statusPayload({ token: { ...statusPayload().token, status: 'completed' }, tokensAhead: 0 }));
+    fireEvent.submit(screen.getByRole('search'));
+    await waitFor(() => expect(screen.getByText('Rate your visit')).toBeInTheDocument());
+    expect(screen.getAllByRole('radio')).toHaveLength(5);
+    expect(screen.getByLabelText('5 stars, Excellent')).toBeInTheDocument();
+  });
+
+  it('submits a rating with a comment and shows thanks', async () => {
+    apiMock.getTokenStatus.mockResolvedValue(statusPayload({ token: { ...statusPayload().token, status: 'completed' }, tokensAhead: 0 }));
+    apiMock.submitFeedback.mockResolvedValue({ feedback: { id: 'fb-1' } });
+    render(<PatientQueueTracker initialTokenNumber="104" />);
+    await waitFor(() => expect(screen.getByText('Rate your visit')).toBeInTheDocument());
+
+    const submit = screen.getByRole('button', { name: 'Submit rating' });
+    expect(submit).toBeDisabled();
+    fireEvent.click(screen.getByLabelText('4 stars, Very good'));
+    expect(screen.getByLabelText('4 stars, Very good')).toHaveAttribute('aria-checked', 'true');
+    fireEvent.change(screen.getByLabelText('Comment (optional)'), { target: { value: 'Quick visit' } });
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(screen.getByText('Thanks for your feedback')).toBeInTheDocument());
+    expect(apiMock.submitFeedback).toHaveBeenCalledWith({ tokenId: 'tok-1', rating: 4, comment: 'Quick visit' });
+  });
+
+  it('shows an error when the rating cannot be saved', async () => {
+    apiMock.getTokenStatus.mockResolvedValue(statusPayload({ token: { ...statusPayload().token, status: 'completed' }, tokensAhead: 0 }));
+    apiMock.submitFeedback.mockRejectedValue(Object.assign(new Error('Server down'), { status: 0 }));
+    render(<PatientQueueTracker initialTokenNumber="104" />);
+    await waitFor(() => expect(screen.getByText('Rate your visit')).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText('5 stars, Excellent'));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit rating' }));
+    await waitFor(() => expect(screen.getByText('Server down')).toBeInTheDocument());
+    expect(screen.queryByText('Thanks for your feedback')).toBeNull();
   });
 });

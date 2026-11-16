@@ -17,7 +17,8 @@ import {
   WifiOff,
   LogOut,
   Bell,
-  Check
+  Check,
+  Settings2
 } from 'lucide-react';
 
 const navItems = [
@@ -26,18 +27,20 @@ const navItems = [
   { id: 'tv', label: 'TV', fullLabel: 'Waiting room TV', icon: Tv },
   { id: 'reception', label: 'Reception', fullLabel: 'Reception desk', icon: Users },
   { id: 'doctor', label: 'Doctor', fullLabel: 'Doctor desk', icon: Stethoscope },
-  { id: 'analytics', label: 'Analytics', fullLabel: 'Analytics', icon: BarChart3 }
+  { id: 'analytics', label: 'Analytics', fullLabel: 'Analytics', icon: BarChart3 },
+  { id: 'admin', label: 'Admin', fullLabel: 'Admin dashboard', icon: Settings2 }
 ];
 
 const roles = [
   { key: 'reception', name: 'Reception Desk', detail: 'Sunita Sharma', icon: Users },
   { key: 'doc-1', name: 'Dr. Rajesh Sharma', detail: 'Room 101 · Cardiology', icon: Stethoscope },
-  { key: 'doc-2', name: 'Dr. Priya Patel', detail: 'Room 102 · General Medicine', icon: Stethoscope }
+  { key: 'doc-2', name: 'Dr. Priya Patel', detail: 'Room 102 · General Medicine', icon: Stethoscope },
+  { key: 'admin', name: 'Clinic Admin', detail: 'Settings · Doctors · Reports', icon: Settings2 }
 ];
 
 export const Navbar = ({ activeTab, setActiveTab, clinic }) => {
   const { isConnected, isAudioMuted, toggleSound, testChime } = useSocket();
-  const { user, loginAsReceptionist, loginAsDoctor, logout } = useAuth();
+  const { user, loginAsReceptionist, loginAsDoctor, loginAsAdmin, logout } = useAuth();
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -82,6 +85,9 @@ export const Navbar = ({ activeTab, setActiveTab, clinic }) => {
     if (key === 'reception') {
       loginAsReceptionist();
       go('reception');
+    } else if (key === 'admin') {
+      loginAsAdmin();
+      go('admin');
     } else {
       loginAsDoctor(key);
       go('doctor');

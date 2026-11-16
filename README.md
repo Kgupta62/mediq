@@ -65,6 +65,7 @@ Seeded on first run (`server/src/config/db.js`).
 | Doctor (Room 101) | `doctor.sharma@clinic.com` | `password123` |
 | Doctor (Room 102) | `doctor.patel@clinic.com` | `password123` |
 | Doctor (Room 103) | `doctor.ananya@clinic.com` | `password123` |
+| Admin | `admin@clinic.com` | `password123` |
 
 Patients do not log in. Booking asks for a phone OTP; the accepted code is `DEMO_OTP` (default `1234`). No real SMS is sent.
 
@@ -103,6 +104,8 @@ Base path `/api`. Source: `server/src/routes/apiRoutes.js`.
 | PATCH | `/clinic` | Update clinic info / notice |
 | GET | `/doctors` | List doctors |
 | GET | `/doctors/:id` | Doctor by id |
+| POST | `/doctors` | Add a doctor (staff) |
+| PATCH | `/doctors/:id` | Edit doctor profile (staff) |
 | PATCH | `/doctors/:id/toggle` | Toggle availability |
 | GET | `/appointments` | List appointments (filterable) |
 | POST | `/appointments` | Book appointment |
@@ -121,7 +124,10 @@ Base path `/api`. Source: `server/src/routes/apiRoutes.js`.
 | GET | `/patients/:phone/history` | Patient visit history |
 | GET | `/prescriptions/:id` | Prescription by id |
 | GET | `/prescriptions/token/:identifier` | Prescription by token |
-| GET | `/analytics` | Queue and wait-time stats |
+| POST | `/feedback` | Patient rates a completed visit, one per token |
+| GET | `/feedback/summary` | Today's average rating, count, latest comments (staff) |
+| GET | `/feedback?limit=` | Feedback list (staff) |
+| GET | `/analytics` | Queue, wait-time and rating stats |
 | GET | `/notifications` | Simulated notification log |
 | POST | `/analytics/reset` | Reset all data |
 | GET | `/schema/postgresql` | PostgreSQL DDL export |

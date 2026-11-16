@@ -19,7 +19,8 @@ const COLUMNS = {
   appointments: ['id', 'appointmentNumber', 'patientName', 'patientPhone', 'patientAge', 'patientGender', 'doctorId', 'doctorName', 'specialization', 'roomNumber', 'appointmentDate', 'slotTime', 'reason', 'status', 'tokenNumber', 'displayToken', 'created_at'],
   queue_tokens: ['id', 'tokenNumber', 'displayToken', 'tokenType', 'patientName', 'patientPhone', 'patientAge', 'patientGender', 'reason', 'doctorId', 'roomNumber', 'status', 'priorityLevel', 'appointmentId', 'checkInTime', 'calledTime', 'completedTime', 'waitTimeMinutes', 'serviceTimeMinutes', 'notes'],
   consultations: ['id', 'tokenId', 'doctorId', 'patientName', 'patientPhone', 'patientAge', 'patientGender', 'diagnosis', 'prescription', 'vitals', 'notes', 'followUpDate', 'created_at'],
-  notifications: ['id', 'recipientPhone', 'channel', 'messageType', 'content', 'status', 'timestamp']
+  notifications: ['id', 'recipientPhone', 'channel', 'messageType', 'content', 'status', 'timestamp'],
+  feedback: ['id', 'tokenId', 'doctorId', 'patientPhone', 'rating', 'comment', 'created_at']
 };
 
 const insertSql = (table) =>
@@ -209,6 +210,7 @@ class SQLiteDatabase {
 
   resetToDefault() {
     this.sqlite.exec(`
+      DELETE FROM feedback;
       DELETE FROM notifications;
       DELETE FROM consultations;
       DELETE FROM queue_tokens;
@@ -253,6 +255,69 @@ class SQLiteDatabase {
     const updated = { ...current, ...fields };
     this.stmt(updateSql('doctors')).run({ ...updated, isAvailable: updated.isAvailable ? 1 : 0 });
     return { ...updated, isAvailable: Boolean(updated.isAvailable) };
+  }
+
+  createDoctor(fields) {
+    const doctor = { ...defaultState.doctors[0], bio: '', avatarUrl: null, ...fields, id: newId('doc'), isAvailable: 1, currentServingTokenId: null, todayQueueCount: 0 };
+    this.stmt(insertSql('doctors')).run(doctor);
+    return this.getDoctorById(doctor.id);
+  }
+
+  updateDoctorProfile(id, fields) {
+    const current = this.getDoctorById(id);
+    if (!current) return null;
+    const allowed = ['name', 'title', 'specialization', 'experience', 'roomNumber', 'fee', 'bio', 'avatarUrl'];
+    const patch = Object.fromEntries(allowed.filter(k => fields[k] !== undefined).map(k => [k, fields[k]]));
+    this.updateDoctor(id, patch);
+    return this.getDoctorById(id);
+  }
+
+  createFeedback(payload) {
+    const item = {
+      id: newId('fb'),
+      tokenId: payload.tokenId,
+      doctorId: payload.doctorId || null,
+      patientPhone: payload.patientPhone || null,
+      rating: payload.rating,
+      comment: payload.comment || '',
+      created_at: nowIso()
+    };
+    this.stmt(insertSql('feedback')).run(item);
+    return item;
+  }
+
+  getFeedbackByToken(tokenId) {
+    return this.stmt('SELECT * FROM feedback WHERE tokenId = ?').get(tokenId) || null;
+  }
+
+  getFeedbackSummary(todayOnly = true) {
+    const { start, end } = todayBounds();
+    const where = todayOnly ? "WHERE f.created_at >= ? AND f.created_at < ?" : "";
+    const params = todayOnly ? [start, end] : [];
+    const agg = this.stmt(`SELECT COUNT(*) AS count, AVG(rating) AS avg FROM feedback f ${where}`).get(...params);
+    const latest = this.stmt(`
+      SELECT f.*, t.displayToken, t.patientName, d.name AS doctorName
+      FROM feedback f
+      LEFT JOIN queue_tokens t ON t.id = f.tokenId
+      LEFT JOIN doctors d ON d.id = f.doctorId
+      ${where} ORDER BY f.created_at DESC LIMIT 5
+    `).all(...params);
+    return {
+      count: agg.count,
+      averageRating: agg.count ? Math.round(agg.avg * 10) / 10 : null,
+      latest
+    };
+  }
+
+  listFeedback(limit = 20) {
+    const safeLimit = Math.min(Math.max(1, Math.floor(Number(limit)) || 20), 200);
+    return this.stmt(`
+      SELECT f.*, t.displayToken, t.patientName, d.name AS doctorName
+      FROM feedback f
+      LEFT JOIN queue_tokens t ON t.id = f.tokenId
+      LEFT JOIN doctors d ON d.id = f.doctorId
+      ORDER BY f.created_at DESC LIMIT ?
+    `).all(safeLimit);
   }
 
   findUserByEmail(email) {
@@ -455,6 +520,7 @@ class SQLiteDatabase {
 
     const avgWaitTime = totals.completed ? Math.round(totals.wait / totals.completed) : 12;
     const avgConsultTime = totals.completed ? Math.round(totals.service / totals.completed) : 8;
+    const feedback = this.getFeedbackSummary(true);
 
     const doctorStats = this.getDoctors().map(doc => {
       const stats = perDoctor.get(doc.id) || { total: 0, completed: 0, waiting: 0, current: null };
@@ -487,8 +553,9 @@ class SQLiteDatabase {
         systemWaitMinutes: avgWaitTime,
         waitTimeReductionPercent: Math.max(0, Math.round(((52 - avgWaitTime) / 52) * 100)),
         crowdingIndexReduction: '74% reduction in waiting room chaos',
-        patientSatisfactionRating: 4.8
-      }
+        patientSatisfactionRating: feedback.averageRating
+      },
+      feedback: { averageRating: feedback.averageRating, count: feedback.count }
     };
   }
 

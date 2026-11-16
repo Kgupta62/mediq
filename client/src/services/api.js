@@ -88,6 +88,13 @@ export const api = {
   getDoctors: () => request('/doctors'),
   getDoctorById: (id) => request(`/doctors/${id}`),
   toggleDoctorAvailability: (id) => request(`/doctors/${id}/toggle`, { method: 'PATCH' }),
+  createDoctor: (payload) => request('/doctors', { method: 'POST', body: JSON.stringify(payload) }),
+  updateDoctor: (id, payload) => request(`/doctors/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  updateClinic: (payload) => request('/clinic', { method: 'PATCH', body: JSON.stringify(payload) }),
+
+  submitFeedback: (payload) => request('/feedback', { method: 'POST', body: JSON.stringify(payload) }),
+  getFeedbackSummary: () => request('/feedback/summary'),
+  getFeedback: (limit = 20) => request(`/feedback?limit=${limit}`),
 
   getAppointments: (params = {}) => {
     const query = new URLSearchParams(params).toString();
